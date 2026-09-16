@@ -48,6 +48,7 @@ async fn main() {
         if let Some(Shape::Circle(circle_idx)) = world.shapes.first() {
             let body_idx = world.circle_all_list[*circle_idx].body_ptr;
             world.bodies[body_idx].set_pos(mouse_world_pos);
+            world.bodies[body_idx].vel = Vec2::zero();
         }
 
         clear_background(LIGHTGRAY);

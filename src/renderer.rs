@@ -49,7 +49,7 @@ pub fn render_world(world: &World, camera: &Camera) {
         let y = scr_pos.y as f32;
         let r = scaled_radius as f32;
         let end_x = x + r * (circle.heading.re as f32);
-        let end_y = y + r * (circle.heading.im as f32);
+        let end_y = y - r * (circle.heading.im as f32);
         draw_circle_lines(x, y, r, 1.0, BLACK);
         draw_line(x, y, end_x, end_y, 1.0, BLACK);
     }

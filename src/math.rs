@@ -31,6 +31,22 @@ impl Vec2 {
     pub fn dist_sq(&self) -> f64 {
         self.x * self.x + self.y * self.y
     }
+
+    pub fn dot(&self, b: &Self) -> f64 {
+        self.x * b.x + self.y * b.y
+    }
+
+    pub fn cross(&self, b: &Self) -> f64 {
+        self.x * b.y - self.y * b.x
+    }
+
+    pub fn cross_sv(scalar: f64, b: &Self) -> Self {
+        Self::new(-scalar * b.y, scalar * b.x)
+    }
+
+    pub fn reverse(&self) -> Self {
+        Self::new(-self.x, -self.y)
+    }
 }
 
 #[derive(Clone, Copy, Debug)]

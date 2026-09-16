@@ -56,4 +56,9 @@ impl RigidBody {
         }
         self.loc_centroid = Vec2::zero();
     }
+
+    pub fn apply_impulse(&mut self, impulse: &Vec2, arm: &Vec2) {
+        self.vel = self.vel.add(&impulse.scale(self.inv_m));
+        self.ang_vel += arm.cross(impulse) * self.inv_i;
+    }
 }
