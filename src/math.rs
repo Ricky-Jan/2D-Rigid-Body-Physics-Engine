@@ -1,5 +1,9 @@
 pub const PI: f64 = std::f64::consts::PI;
 pub const TWO_PI: f64 = 2.0 * PI;
+pub const POS_INF: f64 = f64::INFINITY;
+pub const NEG_INF: f64 = f64::NEG_INFINITY;
+pub const PRIME_A: usize = 73856093;
+pub const PRIME_B: usize = 19349663;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Vec2 {

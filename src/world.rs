@@ -1,11 +1,12 @@
 use crate::{
-    collision::Collision,
+    aabb::AABB,
+    bvh::{DynamicBVH, NULL_PTR, TreeNode},
     math::{TWO_PI, Vec2},
+    pair::Pair,
     rigidbody::RigidBody,
     settings::*,
     shape::{Circle, Shape},
 };
-use std::collections::HashMap;
 
 pub struct World {
     pub context: PhysicsContext,
@@ -15,8 +16,9 @@ pub struct World {
     pub bodies_free_list: Vec<usize>,
     pub bodies_active_list: Vec<usize>,
     pub circle_all_list: Vec<Circle>,
-    pub collisions: Vec<Collision>,
-    pub impulse_cache: HashMap<(usize, usize), (f64, f64)>,
+    pub pair: Pair,
+    pub pair_colliding_list: Vec<usize>,
+    pub bvh: DynamicBVH,
 }
 
 impl World {
@@ -28,14 +30,16 @@ impl World {
         let bias = omega / zeta;
         Self {
             context: PhysicsContext {
-                gravity: Vec2::new(0.0, -98.0),
+                gravity: Vec2::new(0.0, -50.0),
                 dt,
                 linear_drag: 0.997,
                 angular_drag: 0.997,
                 min_elastic: 10f64,
                 impulse_damping,
                 bias,
-                slop: 0.01,
+                slop: 0.05,
+                fatness_predict_rate: 5.0,
+                aabb_fatness: 10.0,
             },
             shapes: Vec::new(),
             bodies: Vec::new(),
@@ -43,8 +47,9 @@ impl World {
             bodies_free_list: Vec::new(),
             bodies_active_list: Vec::new(),
             circle_all_list: Vec::new(),
-            collisions: Vec::new(),
-            impulse_cache: HashMap::new(),
+            pair: Pair::new(),
+            pair_colliding_list: Vec::new(),
+            bvh: DynamicBVH::new(),
         }
     }
 
@@ -95,59 +100,19 @@ impl World {
     }
 
     pub fn step(&mut self) {
+        self.sync_shapes();
         self.apply_forces();
-        self.collisions.clear();
-        let len = self.shapes.len();
-
-        for i in 0..len {
-            let shape_a = self.shapes[i];
-            for j in (i + 1)..len {
-                let shape_b = self.shapes[j];
-                let mut col = match (shape_a, shape_b) {
-                    (Shape::Circle(idx_a), Shape::Circle(idx_b)) => {
-                        let circle_a = self.circle_all_list[idx_a];
-                        let circle_b = self.circle_all_list[idx_b];
-                        Collision::circle_vs_circle(
-                            &circle_a,
-                            &circle_b,
-                            circle_a.body_ptr,
-                            circle_b.body_ptr,
-                        )
-                    }
-
-                    _ => Collision::new_pair(0, 0),
-                };
-
-                if col.contact1.is_some() {
-                    let body_a = &self.bodies[col.body_a_idx];
-                    let body_b = &self.bodies[col.body_b_idx];
-
-                    if body_a.inv_m > 0.0 || body_b.inv_m > 0.0 {
-                        col.init_collision(&self.context, body_a, body_b);
-                        self.collisions.push(col);
-                    }
-                }
-            }
-        }
+        self.broad_phase();
+        self.narrow_phase();
         self.warm_start();
         self.resolve_collisions();
         self.integrate_position();
     }
 
-    fn integrate_position(&mut self) {
-        for &body_idx in &self.bodies_active_list {
-            let body = &mut self.bodies[body_idx];
-            let shape = self.shapes[body.shape_ptr];
-
-            body.set_pos(body.pos.add(&body.vel.scale(self.context.dt)));
-            body.set_angle(body.angle + body.ang_vel * self.context.dt);
-
-            match shape {
-                Shape::Circle(circle_idx) => {
-                    self.circle_all_list[circle_idx].refresh_transform(body)
-                }
-                Shape::Disabled => {}
-            }
+    fn sync_shapes(&mut self) {
+        for circle in &mut self.circle_all_list {
+            let body = &self.bodies[circle.body_ptr];
+            circle.refresh_transform(body);
         }
     }
 
@@ -162,34 +127,111 @@ impl World {
         }
     }
 
-    fn warm_start(&mut self) {
-        for col in &mut self.collisions {
-            if let Some(contact) = &mut col.contact1 {
-                if let Some(&(old_jn, old_jt)) =
-                    self.impulse_cache.get(&(col.body_a_idx, col.body_b_idx))
-                {
-                    contact.prev_jn = old_jn;
-                    contact.prev_jt = old_jt;
+    fn broad_phase(&mut self) {
+        let len = self.circle_all_list.len();
+        for i in 0..len {
+            let body_ptr = self.circle_all_list[i].body_ptr;
+            let vel = self.bodies[body_ptr].vel;
+            let inv_m = self.bodies[body_ptr].inv_m;
+            let node_ptr = self.circle_all_list[i].node_ptr;
+            let aabb = self.circle_all_list[i].get_aabb();
 
-                    let impulse = contact
-                        .normal
-                        .scale(old_jn)
-                        .add(&Vec2::cross_sv(old_jt, &contact.normal));
-
-                    let (left, right) = self.bodies.split_at_mut(col.body_b_idx);
-                    let body_a = &mut left[col.body_a_idx];
-                    let body_b = &mut right[0];
-
-                    body_a.apply_impulse(&impulse.reverse(), &contact.rA);
-                    body_b.apply_impulse(&impulse, &contact.rB);
+            if node_ptr == NULL_PTR {
+                self.update_bvh(aabb, i, &vel, inv_m);
+            } else {
+                let old_fat_aabb = self.circle_all_list[i].fat_aabb;
+                if !old_fat_aabb.contain(&aabb) {
+                    self.bvh.remove_leaf(node_ptr);
+                    self.update_bvh(aabb, i, &vel, inv_m);
                 }
             }
         }
     }
 
+    fn update_bvh(&mut self, aabb: AABB, shape_a_idx: usize, vel: &Vec2, inv_m: f64) {
+        let new_fat_aabb = aabb.fat_aabb(
+            vel,
+            self.context.fatness_predict_rate * self.context.dt,
+            self.context.aabb_fatness,
+        );
+        let new_node_ptr = self
+            .bvh
+            .alloc_node(TreeNode::new_leaf(shape_a_idx, new_fat_aabb));
+        self.bvh.insert_leaf(new_node_ptr);
+        self.circle_all_list[shape_a_idx].node_ptr = new_node_ptr;
+        self.circle_all_list[shape_a_idx].fat_aabb = new_fat_aabb;
+
+        let candidate = self.bvh.query(&new_fat_aabb);
+        for &shape_b_idx in &candidate {
+            if shape_a_idx != shape_b_idx {
+                let body_b_ptr = self.circle_all_list[shape_b_idx].body_ptr;
+                if inv_m > 0.0 || self.bodies[body_b_ptr].inv_m > 0.0 {
+                    let body_a_ptr = self.circle_all_list[shape_a_idx].body_ptr;
+                    self.pair.get(body_a_ptr, body_b_ptr);
+                }
+            }
+        }
+    }
+
+    fn narrow_phase(&mut self) {
+        self.pair_colliding_list.clear();
+
+        let mut i = self.pair.active_pairs.len();
+        while i > 0 {
+            i -= 1;
+            let pool_idx = self.pair.active_pairs[i];
+            let col = &mut self.pair.pool[pool_idx].col;
+
+            let shape_a_idx = match self.shapes[self.bodies[col.body_a_idx].shape_ptr] {
+                Shape::Circle(idx) => idx,
+            };
+            let shape_b_idx = match self.shapes[self.bodies[col.body_b_idx].shape_ptr] {
+                Shape::Circle(idx) => idx,
+            };
+
+            let circle_a = &self.circle_all_list[shape_a_idx];
+            let circle_b = &self.circle_all_list[shape_b_idx];
+
+            if circle_a.get_aabb().intersect(&circle_b.get_aabb()) {
+                if col.circle_vs_circle(circle_a, circle_b) {
+                    let body_a = &self.bodies[col.body_a_idx];
+                    let body_b = &self.bodies[col.body_b_idx];
+                    col.init_collision(&self.context, body_a, body_b);
+                    self.pair_colliding_list.push(pool_idx);
+                }
+            } else {
+                col.contact.prev_jn = 0.0;
+                col.contact.prev_jt = 0.0;
+                if !circle_a.fat_aabb.intersect(&circle_b.fat_aabb) {
+                    self.pair.remove(pool_idx);
+                }
+            }
+        }
+    }
+
+    fn warm_start(&mut self) {
+        for &pool_idx in &self.pair_colliding_list {
+            let col = &mut self.pair.pool[pool_idx].col;
+            let contact = &col.contact;
+            let impulse = contact
+                .normal
+                .scale(contact.prev_jn)
+                .add(&Vec2::cross_sv(contact.prev_jt, &contact.normal));
+
+            let (left, right) = self.bodies.split_at_mut(col.body_b_idx);
+            let body_a = &mut left[col.body_a_idx];
+            let body_b = &mut right[0];
+
+            body_a.apply_impulse(&impulse.reverse(), &contact.rA);
+            body_b.apply_impulse(&impulse, &contact.rB);
+        }
+    }
+
     fn resolve_collisions(&mut self) {
         for _ in 0..SOLVER_ITER {
-            for col in &mut self.collisions {
+            for &pool_idx in &self.pair_colliding_list {
+                let col = &mut self.pair.pool[pool_idx].col;
+
                 let idx_a = col.body_a_idx;
                 let idx_b = col.body_b_idx;
                 let (left, right) = self.bodies.split_at_mut(idx_b);
@@ -199,15 +241,13 @@ impl World {
                 col.resolve_collision(body_a, body_b);
             }
         }
+    }
 
-        self.impulse_cache.clear();
-        for col in &self.collisions {
-            if let Some(contact) = &col.contact1 {
-                self.impulse_cache.insert(
-                    (col.body_a_idx, col.body_b_idx),
-                    (contact.prev_jn, contact.prev_jt),
-                );
-            }
+    fn integrate_position(&mut self) {
+        for &body_idx in &self.bodies_active_list {
+            let body = &mut self.bodies[body_idx];
+            body.set_pos(body.pos.add(&body.vel.scale(self.context.dt)));
+            body.set_angle(body.angle + body.ang_vel * self.context.dt);
         }
     }
 }
@@ -221,4 +261,6 @@ pub struct PhysicsContext {
     pub bias: f64,
     pub impulse_damping: f64,
     pub slop: f64,
+    pub fatness_predict_rate: f64,
+    pub aabb_fatness: f64,
 }

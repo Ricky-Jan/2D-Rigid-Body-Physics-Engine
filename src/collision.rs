@@ -2,6 +2,7 @@ use crate::{
     math::Vec2, rigidbody::RigidBody, settings::EPS, shape::Circle, world::PhysicsContext,
 };
 
+#[derive(Clone, Copy)]
 pub struct Contact {
     pub pos: Vec2,
     pub normal: Vec2,
@@ -35,78 +36,35 @@ impl Contact {
             prev_jt: 0.0,
         }
     }
+
+    pub fn empty() -> Self {
+        Self::new(Vec2::zero(), Vec2::zero(), 0.0)
+    }
 }
+
+#[derive(Clone, Copy)]
 pub struct Collision {
-    pub contact1: Option<Contact>,
-    pub contact2: Option<Contact>,
+    pub contact: Contact,
     pub body_a_idx: usize,
     pub body_b_idx: usize,
     pub restitution: f64,
     pub friction: f64,
-    pub is_swapped: bool,
 }
 impl Collision {
-    pub fn circle_vs_circle(
-        circle_a: &Circle,
-        circle_b: &Circle,
-        body_a_idx: usize,
-        body_b_idx: usize,
-    ) -> Self {
-        let mut col = Self::new_pair(body_a_idx, body_b_idx);
-
-        let delta = circle_b.pos.sub(&circle_a.pos);
-        let dist_sq = delta.dist_sq();
-
-        if dist_sq < EPS {
-            return col;
-        }
-
-        let r_sum = circle_a.radius + circle_b.radius;
-        if dist_sq < r_sum * r_sum {
-            let dist = dist_sq.sqrt();
-            let normal = delta.scale(1.0 / dist);
-            let penetration = r_sum - dist;
-            let pos = circle_a.pos.add(&normal.scale(circle_a.radius));
-
-            col.add_contact(pos, normal, penetration);
-        }
-
-        col
-    }
-
     pub fn new_pair(body_a_idx: usize, body_b_idx: usize) -> Self {
-        let is_swapped = body_a_idx > body_b_idx;
-        let (final_a, final_b) = if is_swapped {
-            (body_b_idx, body_a_idx)
-        } else {
-            (body_a_idx, body_b_idx)
-        };
-
         Self {
-            body_a_idx: final_a,
-            body_b_idx: final_b,
-            contact1: None,
-            contact2: None,
+            body_a_idx: body_a_idx,
+            body_b_idx: body_b_idx,
+            contact: Contact::empty(),
             friction: 0.0,
             restitution: 0.0,
-            is_swapped,
         }
     }
 
     pub fn add_contact(&mut self, pos: Vec2, normal: Vec2, penetration: f64) {
-        let final_normal = if self.is_swapped {
-            normal.reverse()
-        } else {
-            normal
-        };
-
-        let new_contact = Contact::new(pos, final_normal, penetration);
-
-        if self.contact1.is_none() {
-            self.contact1 = Some(new_contact);
-        } else if self.contact2.is_none() {
-            self.contact2 = Some(new_contact);
-        }
+        self.contact.pos = pos;
+        self.contact.normal = normal;
+        self.contact.penetration = penetration;
     }
 
     pub fn init_collision(
@@ -117,16 +75,7 @@ impl Collision {
     ) {
         self.restitution = body_a.restitution.max(body_b.restitution);
         self.friction = (body_a.friction * body_b.friction).sqrt();
-
-        let restitution = self.restitution;
-
-        if let Some(contact1) = &mut self.contact1 {
-            Self::presolve_contact(context, contact1, body_a, body_b, restitution);
-
-            if let Some(contact2) = &mut self.contact2 {
-                Self::presolve_contact(context, contact2, body_a, body_b, restitution);
-            }
-        }
+        Self::presolve_contact(context, &mut self.contact, body_a, body_b, self.restitution);
     }
 
     fn presolve_contact(
@@ -162,13 +111,7 @@ impl Collision {
     }
 
     pub fn resolve_collision(&mut self, body_a: &mut RigidBody, body_b: &mut RigidBody) {
-        let friction = self.friction;
-        if let Some(contact1) = &mut self.contact1 {
-            Self::resolve_impulse(contact1, body_a, body_b, friction);
-            if let Some(contact2) = &mut self.contact2 {
-                Self::resolve_impulse(contact2, body_a, body_b, friction);
-            }
-        }
+        Self::resolve_impulse(&mut self.contact, body_a, body_b, self.friction);
     }
 
     fn resolve_impulse(
@@ -225,5 +168,28 @@ impl Collision {
 
         body_a.apply_impulse(&impulse.reverse(), &contact.rA);
         body_b.apply_impulse(&impulse, &contact.rB);
+    }
+
+    pub fn circle_vs_circle(&mut self, circle_a: &Circle, circle_b: &Circle) -> bool {
+        let delta = circle_b.pos.sub(&circle_a.pos);
+        let dist_sq = delta.dist_sq();
+
+        if dist_sq < EPS {
+            return false;
+        }
+
+        let r_sum = circle_a.radius + circle_b.radius;
+        if dist_sq < r_sum * r_sum {
+            let dist = dist_sq.sqrt();
+            let normal = delta.scale(1.0 / dist);
+            let penetration = r_sum - dist;
+            let pos = circle_a.pos.add(&normal.scale(circle_a.radius));
+
+            self.add_contact(pos, normal, penetration);
+
+            true
+        } else {
+            false
+        }
     }
 }

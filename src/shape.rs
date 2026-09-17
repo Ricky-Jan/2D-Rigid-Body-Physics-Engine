@@ -1,4 +1,6 @@
 use crate::{
+    aabb::AABB,
+    bvh::NULL_PTR,
     math::{Complex, Vec2},
     rigidbody::RigidBody,
 };
@@ -6,7 +8,6 @@ use crate::{
 #[derive(Clone, Copy)]
 pub enum Shape {
     Circle(usize),
-    Disabled,
 }
 
 #[derive(Clone, Copy)]
@@ -17,6 +18,10 @@ pub struct Circle {
     pub index: usize,
     pub radius: f64,
     pub body_ptr: usize,
+
+    pub node_ptr: usize,
+    pub aabb: AABB,
+    pub fat_aabb: AABB,
 }
 
 impl Circle {
@@ -28,6 +33,9 @@ impl Circle {
             radius,
             index: 0,
             body_ptr,
+            node_ptr: NULL_PTR,
+            aabb: AABB::empty(),
+            fat_aabb: AABB::empty(),
         }
     }
 
@@ -35,5 +43,14 @@ impl Circle {
         self.pos = body.pos;
         self.angle = body.angle;
         self.heading = body.heading;
+
+        self.aabb = AABB::new(
+            Vec2::new(self.pos.x - self.radius, self.pos.y - self.radius),
+            Vec2::new(self.pos.x + self.radius, self.pos.y + self.radius),
+        );
+    }
+
+    pub fn get_aabb(&self) -> AABB {
+        self.aabb
     }
 }

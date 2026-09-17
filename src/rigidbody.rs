@@ -1,4 +1,7 @@
-use crate::math::{Complex, PI, TWO_PI, Vec2};
+use crate::{
+    math::{Complex, PI, TWO_PI, Vec2},
+    settings::{DEFAULT_FRICTION, DEFAULT_RESTITUTION},
+};
 
 pub struct RigidBody {
     pub pos: Vec2,
@@ -30,8 +33,8 @@ impl RigidBody {
             inv_m: 0f64,
             inv_i: 0f64,
             shape_ptr: 0,
-            restitution: 0.2f64,
-            friction: 0.4f64,
+            restitution: DEFAULT_RESTITUTION,
+            friction: DEFAULT_FRICTION,
         }
     }
 
@@ -48,8 +51,9 @@ impl RigidBody {
     pub fn calc_circle_properties(&mut self, radius: f64) {
         if self.density > 0.0 {
             let r_sq = radius * radius;
-            self.inv_m = 1.0 / (PI * r_sq * self.density);
-            self.inv_i = 1.0 / (0.5 * r_sq);
+            let mass = PI * r_sq * self.density;
+            self.inv_m = 1.0 / mass;
+            self.inv_i = 1.0 / (0.5 * mass * r_sq);
         } else {
             self.inv_m = 0.0;
             self.inv_i = 0.0;

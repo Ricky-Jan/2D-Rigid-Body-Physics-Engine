@@ -11,21 +11,17 @@ impl TestScene {
     pub fn create_world() -> World {
         let mut world = World::new();
 
-        Self::add_circle(&mut world, 400.0, -100.0, 300.0, 0.0, 0.0); // 大地板
-        Self::add_circle(&mut world, 50.0, 100.0, 150.0, 0.0, 0.0); // 左牆
-        Self::add_circle(&mut world, 750.0, 100.0, 150.0, 0.0, 0.0);
+        Self::add_circle(&mut world, 0.0, -1000.0, 1000.0, 0.0, 0.0);
+        Self::add_circle(&mut world, -1300.0, 0.0, 1000.0, 0.0, 0.0);
+        Self::add_circle(&mut world, 1300.0, 0.0, 1000.0, 0.0, 0.0);
 
-        for _ in 0..50 {
+        for _ in 0..500 {
             let x = gen_range(100.0, 700.0);
-            let y = gen_range(300.0, 800.0);
-            let radius = gen_range(10.0, 25.0);
-            let angle = gen_range(0.0, PI * 2.0);
+            let y = gen_range(300.0, 4000.0);
 
-            let density = if gen_range(0.0, 1.0) < 0.1 {
-                0.0
-            } else {
-                gen_range(0.5, 2.0)
-            };
+            let radius = gen_range(5.0, 12.0);
+            let angle = gen_range(0.0, PI * 2.0);
+            let density = gen_range(0.5, 2.0);
 
             Self::add_circle(&mut world, x, y, radius, angle, density);
         }

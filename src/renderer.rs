@@ -1,4 +1,4 @@
-use crate::{math::Vec2, world::World};
+use crate::{aabb::AABB, bvh::NULL_PTR, math::Vec2, world::World};
 use macroquad::prelude::*;
 
 pub struct Camera {
@@ -56,23 +56,61 @@ pub fn render_world(world: &World, camera: &Camera) {
 }
 
 pub fn debug_renderer(world: &World, camera: &Camera) {
-    for col in &world.collisions {
-        if let Some(contact) = &col.contact1 {
-            let scr_pos = camera.transform_pos(&contact.pos);
-            draw_circle(scr_pos.x as f32, scr_pos.y as f32, 5.0, YELLOW);
+    draw_bvh_node(world, world.bvh.root, camera, 0);
 
-            let len = contact.penetration.max(5.0);
-            let line_end = contact.pos.add(&contact.normal.scale(len));
-            let scr_end = camera.transform_pos(&line_end);
+    for circle in &world.circle_all_list {
+        draw_aabb(&circle.get_aabb(), camera, BLUE, 1.5);
+        draw_aabb(&circle.fat_aabb, camera, RED, 1.0);
+    }
 
-            draw_line(
-                scr_pos.x as f32,
-                scr_pos.y as f32,
-                scr_end.x as f32,
-                scr_end.y as f32,
-                3.0,
-                GREEN,
-            )
+    for &pool_idx in &world.pair_colliding_list {
+        let col = world.pair.pool[pool_idx].col;
+        let contact = &col.contact;
+
+        let scr_pos = camera.transform_pos(&contact.pos);
+        draw_circle(scr_pos.x as f32, scr_pos.y as f32, 5.0, YELLOW);
+
+        let len = contact.penetration.max(5.0);
+        let line_end = contact.pos.add(&contact.normal.scale(len));
+        let scr_end = camera.transform_pos(&line_end);
+
+        draw_line(
+            scr_pos.x as f32,
+            scr_pos.y as f32,
+            scr_end.x as f32,
+            scr_end.y as f32,
+            3.0,
+            GREEN,
+        )
+    }
+
+    fn draw_aabb(aabb: &AABB, camera: &Camera, color: Color, thickness: f32) {
+        let min_scr = camera.transform_pos(&aabb.min);
+        let max_scr = camera.transform_pos(&aabb.max);
+
+        let x = min_scr.x as f32;
+        let y = max_scr.y as f32;
+        let w = (max_scr.x - min_scr.x) as f32;
+        let h = (min_scr.y - max_scr.y) as f32;
+
+        draw_rectangle_lines(x, y, w, h, thickness, color);
+    }
+
+    fn draw_bvh_node(world: &World, node_idx: usize, camera: &Camera, depth: u32) {
+        if node_idx == NULL_PTR {
+            return;
+        }
+
+        let node = &world.bvh.nodes[node_idx];
+
+        let r = 0.5 + (depth as f32 * 0.1).min(0.5);
+        let color = Color::new(r, 0.5, 0.5, 0.15);
+
+        draw_aabb(&node.aabb, camera, color, 1.0);
+
+        if !node.is_leaf {
+            draw_bvh_node(world, node.left, camera, depth + 1);
+            draw_bvh_node(world, node.right, camera, depth + 1);
         }
     }
 }
