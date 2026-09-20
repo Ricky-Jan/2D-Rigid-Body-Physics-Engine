@@ -5,7 +5,7 @@ use crate::{
     pair::Pair,
     rigidbody::RigidBody,
     settings::*,
-    shape::{Circle, Shape},
+    shape::{Shape, ShapeType},
 };
 
 pub struct World {
@@ -13,9 +13,11 @@ pub struct World {
     pub shapes: Vec<Shape>,
     pub bodies: Vec<RigidBody>,
     pub shapes_free_list: Vec<usize>,
+    pub shape_all_list: Vec<usize>,
+    pub circle_all_list: Vec<usize>,
+    pub rect_all_list: Vec<usize>,
     pub bodies_free_list: Vec<usize>,
     pub bodies_active_list: Vec<usize>,
-    pub circle_all_list: Vec<Circle>,
     pub pair: Pair,
     pub pair_colliding_list: Vec<usize>,
     pub bvh: DynamicBVH,
@@ -44,16 +46,18 @@ impl World {
             shapes: Vec::new(),
             bodies: Vec::new(),
             shapes_free_list: Vec::new(),
+            shape_all_list: Vec::new(),
+            circle_all_list: Vec::new(),
+            rect_all_list: Vec::new(),
             bodies_free_list: Vec::new(),
             bodies_active_list: Vec::new(),
-            circle_all_list: Vec::new(),
             pair: Pair::new(),
             pair_colliding_list: Vec::new(),
             bvh: DynamicBVH::new(),
         }
     }
 
-    fn set_softness(&mut self, freq: f64, damping: f64) {
+    pub fn set_softness(&mut self, freq: f64, damping: f64) {
         let omega = TWO_PI * freq;
         let zeta = 2.0 * damping + omega * self.context.dt;
         self.context.impulse_damping = 1.0 + (1.0 / (omega * zeta) * self.context.dt);
@@ -63,12 +67,12 @@ impl World {
     pub fn add_body(&mut self, body: RigidBody) -> usize {
         let is_active = body.inv_m > 0.0;
         let index;
-        if self.bodies_free_list.is_empty() {
+        if let Some(free_idx) = self.bodies_free_list.pop() {
+            index = free_idx;
+            self.bodies[index] = body;
+        } else {
             index = self.bodies.len();
             self.bodies.push(body);
-        } else {
-            index = self.bodies_free_list.pop().unwrap();
-            self.bodies[index] = body;
         }
 
         if is_active {
@@ -77,24 +81,27 @@ impl World {
         index
     }
 
-    pub fn add_circle(&mut self, mut circle: Circle) -> usize {
-        let circle_idx = self.circle_all_list.len();
-        circle.index = circle_idx;
-        self.circle_all_list.push(circle);
+    pub fn add_shape(&mut self, shape_type: ShapeType, body_ptr: usize) -> usize {
+        let mut shape = Shape::new(shape_type, body_ptr);
+        let body = &self.bodies[body_ptr];
+        shape.refresh_transform(body); // 建立時立刻對齊本體 Transform
 
         let shape_idx;
-        if self.shapes_free_list.is_empty() {
-            shape_idx = self.shapes.len();
-            self.shapes.push(Shape::Circle(circle_idx));
+        if let Some(free_idx) = self.shapes_free_list.pop() {
+            shape_idx = free_idx;
+            self.shapes[shape_idx] = shape;
         } else {
-            shape_idx = self.shapes_free_list.pop().unwrap();
-            self.shapes[shape_idx] = Shape::Circle(circle_idx);
+            shape_idx = self.shapes.len();
+            self.shapes.push(shape);
         }
 
-        let body_ptr = circle.body_ptr;
-        let body = &self.bodies[body_ptr];
-        self.circle_all_list[circle_idx].refresh_transform(body);
+        self.shape_all_list.push(shape_idx);
         self.bodies[body_ptr].shape_ptr = shape_idx;
+
+        match shape_type {
+            ShapeType::Circle(_) => self.circle_all_list.push(shape_idx),
+            ShapeType::Rect(_) => self.rect_all_list.push(shape_idx),
+        }
 
         shape_idx
     }
@@ -110,9 +117,10 @@ impl World {
     }
 
     fn sync_shapes(&mut self) {
-        for circle in &mut self.circle_all_list {
-            let body = &self.bodies[circle.body_ptr];
-            circle.refresh_transform(body);
+        for &shape_idx in &self.shape_all_list {
+            let body_ptr = self.shapes[shape_idx].body_ptr;
+            let body = &self.bodies[body_ptr]; // 透過 Disjoint borrows 安全取用
+            self.shapes[shape_idx].refresh_transform(body);
         }
     }
 
@@ -128,22 +136,22 @@ impl World {
     }
 
     fn broad_phase(&mut self) {
-        let len = self.circle_all_list.len();
-        for i in 0..len {
-            let body_ptr = self.circle_all_list[i].body_ptr;
+        for i in 0..self.shape_all_list.len() {
+            let shape_idx = self.shape_all_list[i];
+
+            let body_ptr = self.shapes[shape_idx].body_ptr;
             let vel = self.bodies[body_ptr].vel;
             let inv_m = self.bodies[body_ptr].inv_m;
-            let node_ptr = self.circle_all_list[i].node_ptr;
-            let aabb = self.circle_all_list[i].get_aabb();
+
+            let node_ptr = self.shapes[shape_idx].node_ptr;
+            let aabb = self.shapes[shape_idx].aabb;
+            let fat_aabb = self.shapes[shape_idx].fat_aabb;
 
             if node_ptr == NULL_PTR {
-                self.update_bvh(aabb, i, &vel, inv_m);
-            } else {
-                let old_fat_aabb = self.circle_all_list[i].fat_aabb;
-                if !old_fat_aabb.contain(&aabb) {
-                    self.bvh.remove_leaf(node_ptr);
-                    self.update_bvh(aabb, i, &vel, inv_m);
-                }
+                self.update_bvh(aabb, shape_idx, &vel, inv_m);
+            } else if !fat_aabb.contain(&aabb) {
+                self.bvh.remove_leaf(node_ptr);
+                self.update_bvh(aabb, shape_idx, &vel, inv_m);
             }
         }
     }
@@ -157,16 +165,17 @@ impl World {
         let new_node_ptr = self
             .bvh
             .alloc_node(TreeNode::new_leaf(shape_a_idx, new_fat_aabb));
+
         self.bvh.insert_leaf(new_node_ptr);
-        self.circle_all_list[shape_a_idx].node_ptr = new_node_ptr;
-        self.circle_all_list[shape_a_idx].fat_aabb = new_fat_aabb;
+        self.shapes[shape_a_idx].node_ptr = new_node_ptr;
+        self.shapes[shape_a_idx].fat_aabb = new_fat_aabb;
 
         let candidate = self.bvh.query(&new_fat_aabb);
         for &shape_b_idx in &candidate {
             if shape_a_idx != shape_b_idx {
-                let body_b_ptr = self.circle_all_list[shape_b_idx].body_ptr;
+                let body_b_ptr = self.shapes[shape_b_idx].body_ptr;
                 if inv_m > 0.0 || self.bodies[body_b_ptr].inv_m > 0.0 {
-                    let body_a_ptr = self.circle_all_list[shape_a_idx].body_ptr;
+                    let body_a_ptr = self.shapes[shape_a_idx].body_ptr;
                     self.pair.get(body_a_ptr, body_b_ptr);
                 }
             }
@@ -182,18 +191,16 @@ impl World {
             let pool_idx = self.pair.active_pairs[i];
             let col = &mut self.pair.pool[pool_idx].col;
 
-            let shape_a_idx = match self.shapes[self.bodies[col.body_a_idx].shape_ptr] {
-                Shape::Circle(idx) => idx,
-            };
-            let shape_b_idx = match self.shapes[self.bodies[col.body_b_idx].shape_ptr] {
-                Shape::Circle(idx) => idx,
-            };
+            let shape_a_idx = self.bodies[col.body_a_idx].shape_ptr;
+            let shape_b_idx = self.bodies[col.body_b_idx].shape_ptr;
 
-            let circle_a = &self.circle_all_list[shape_a_idx];
-            let circle_b = &self.circle_all_list[shape_b_idx];
+            let shape_a = &self.shapes[shape_a_idx];
+            let shape_b = &self.shapes[shape_b_idx];
 
-            if circle_a.get_aabb().intersect(&circle_b.get_aabb()) {
-                if col.circle_vs_circle(circle_a, circle_b) {
+            if shape_a.aabb.intersect(&shape_b.aabb) {
+                let is_colliding = col.is_colliding(shape_a, shape_b);
+
+                if is_colliding {
                     let body_a = &self.bodies[col.body_a_idx];
                     let body_b = &self.bodies[col.body_b_idx];
                     col.init_collision(&self.context, body_a, body_b);
@@ -202,7 +209,7 @@ impl World {
             } else {
                 col.contact.prev_jn = 0.0;
                 col.contact.prev_jt = 0.0;
-                if !circle_a.fat_aabb.intersect(&circle_b.fat_aabb) {
+                if !shape_a.fat_aabb.intersect(&shape_b.fat_aabb) {
                     self.pair.remove(pool_idx);
                 }
             }

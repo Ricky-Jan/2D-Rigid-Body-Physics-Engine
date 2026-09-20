@@ -61,6 +61,19 @@ impl RigidBody {
         self.loc_centroid = Vec2::zero();
     }
 
+    pub fn calc_rect_properties(&mut self, width: f64, height: f64) {
+        if self.density > 0.0 {
+            let mass = width * height * self.density;
+            let inertia = mass * (width * width + height * height) / 12.0;
+            self.inv_m = 1.0 / mass;
+            self.inv_i = 1.0 / inertia;
+        } else {
+            self.inv_m = 0.0;
+            self.inv_i = 0.0;
+        }
+        self.loc_centroid = Vec2::zero();
+    }
+
     pub fn apply_impulse(&mut self, impulse: &Vec2, arm: &Vec2) {
         self.vel = self.vel.add(&impulse.scale(self.inv_m));
         self.ang_vel += arm.cross(impulse) * self.inv_i;

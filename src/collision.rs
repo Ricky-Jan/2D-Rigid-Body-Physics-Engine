@@ -1,5 +1,9 @@
 use crate::{
-    math::Vec2, rigidbody::RigidBody, settings::EPS, shape::Circle, world::PhysicsContext,
+    math::{Complex, Vec2},
+    rigidbody::RigidBody,
+    settings::EPS,
+    shape::{Shape, ShapeType},
+    world::PhysicsContext,
 };
 
 #[derive(Clone, Copy)]
@@ -170,26 +174,127 @@ impl Collision {
         body_b.apply_impulse(&impulse, &contact.rB);
     }
 
-    pub fn circle_vs_circle(&mut self, circle_a: &Circle, circle_b: &Circle) -> bool {
-        let delta = circle_b.pos.sub(&circle_a.pos);
-        let dist_sq = delta.dist_sq();
+    pub fn is_colliding(&mut self, shape_a: &Shape, shape_b: &Shape) -> bool {
+        let a_id = shape_a.shape_type.get_id();
+        let b_id = shape_b.shape_type.get_id();
 
-        if dist_sq < EPS {
-            return false;
+        let swap = a_id > b_id;
+        let (s1, s2) = if swap {
+            (shape_b, shape_a)
+        } else {
+            (shape_a, shape_b)
+        };
+
+        let col = match (&s1.shape_type, &s2.shape_type) {
+            (ShapeType::Circle(c1), ShapeType::Circle(c2)) => {
+                self.circle_vs_circle(&s1.pos, c1.radius, &s2.pos, c2.radius)
+            }
+
+            (ShapeType::Circle(c), ShapeType::Rect(r)) => {
+                self.circle_vs_rect(&s1.pos, c.radius, &s2.pos, &s2.heading, r.hw, r.hh)
+            }
+
+            (ShapeType::Rect(r1), ShapeType::Rect(r2)) => false,
+
+            _ => unreachable!("Shape order enforcement failed!"),
+        };
+
+        if col && swap {
+            self.contact.normal = self.contact.normal.reverse();
         }
 
-        let r_sum = circle_a.radius + circle_b.radius;
+        col
+    }
+
+    fn circle_vs_circle(
+        &mut self,
+        pos_a: &Vec2,
+        radius_a: f64,
+        pos_b: &Vec2,
+        radius_b: f64,
+    ) -> bool {
+        let delta = pos_b.sub(pos_a);
+        let dist_sq = delta.dist_sq();
+        let r_sum = radius_a + radius_b;
+
+        if dist_sq < EPS {
+            let normal = Vec2::new(1.0, 0.0);
+            let pos = Vec2::new(pos_a.x + radius_a, pos_a.y);
+            self.add_contact(pos, normal, r_sum);
+            return true;
+        }
+
         if dist_sq < r_sum * r_sum {
             let dist = dist_sq.sqrt();
             let normal = delta.scale(1.0 / dist);
             let penetration = r_sum - dist;
-            let pos = circle_a.pos.add(&normal.scale(circle_a.radius));
-
+            let pos = pos_a.add(&normal.scale(radius_a));
             self.add_contact(pos, normal, penetration);
-
-            true
-        } else {
-            false
+            return true;
         }
+
+        false
+    }
+
+    fn circle_vs_rect(
+        &mut self,
+        c_pos: &Vec2,
+        c_radius: f64,
+        r_pos: &Vec2,
+        r_heading: &Complex,
+        r_hw: f64,
+        r_hh: f64,
+    ) -> bool {
+        let delta = r_pos.sub(c_pos);
+        let loc = r_heading.inv_rotate(&delta);
+        let cls_x = loc.x.clamp(-r_hw, r_hw);
+        let cls_y = loc.y.clamp(-r_hh, r_hh);
+
+        let clx = loc.x - cls_x;
+        let cly = loc.y - cls_y;
+
+        let len_sq = clx * clx + cly * cly;
+
+        if len_sq > c_radius * c_radius {
+            return false;
+        }
+
+        let len = len_sq.sqrt();
+
+        if len < EPS {
+            let dw = r_hw - loc.x.abs();
+            let dh = r_hh - loc.y.abs();
+
+            if dw < dh {
+                if loc.x > 0.0 {
+                    let normal = r_heading.rotate(&Vec2::new(1.0, 0.0));
+                    let pos = c_pos.sub(&normal.scale(c_radius));
+                    self.add_contact(pos, normal, dw + c_radius);
+                } else {
+                    let normal = r_heading.rotate(&Vec2::new(-1.0, 0.0));
+                    let pos = c_pos.sub(&normal.scale(c_radius));
+                    self.add_contact(pos, normal, dw + c_radius);
+                }
+            } else {
+                if loc.y > 0.0 {
+                    let normal = r_heading.rotate(&Vec2::new(0.0, 1.0));
+                    let pos = c_pos.sub(&normal.scale(c_radius));
+                    self.add_contact(pos, normal, dh + c_radius);
+                } else {
+                    let normal = r_heading.rotate(&Vec2::new(0.0, -1.0));
+                    let pos = c_pos.sub(&normal.scale(c_radius));
+                    self.add_contact(pos, normal, dh + c_radius);
+                }
+            }
+            return true;
+        }
+
+        let local_n = Vec2::new(clx / len, cly / len);
+        let normal = r_heading.rotate(&local_n);
+        let pos = c_pos.add(&normal.scale(c_radius));
+
+        self.add_contact(pos, normal, c_radius - len);
+
+        true
     }
 }

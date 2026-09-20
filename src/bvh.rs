@@ -10,6 +10,7 @@ pub struct TreeNode {
     pub shape_idx: usize,
     pub next_free: usize,
     pub is_leaf: bool,
+    pub height: i32,
 }
 impl TreeNode {
     pub fn new_leaf(shape_idx: usize, aabb: AABB) -> Self {
@@ -21,6 +22,7 @@ impl TreeNode {
             shape_idx,
             next_free: NULL_PTR,
             is_leaf: true,
+            height: 0,
         }
     }
 
@@ -33,6 +35,7 @@ impl TreeNode {
             shape_idx: 0,
             next_free: NULL_PTR,
             is_leaf: false,
+            height: 0,
         }
     }
 }
@@ -59,8 +62,9 @@ impl DynamicBVH {
             self.nodes[idx] = node;
             idx
         } else {
+            let idx = self.nodes.len();
             self.nodes.push(node);
-            self.nodes.len() - 1
+            idx
         }
     }
 
@@ -77,6 +81,34 @@ impl DynamicBVH {
         }
 
         let leaf_aabb = self.nodes[leaf].aabb;
+        let sibling = self.sah(leaf_aabb);
+        let old_parent = self.nodes[sibling].parent;
+
+        let mut new_parent_node = TreeNode::new_internal();
+        new_parent_node.parent = old_parent;
+        new_parent_node.aabb = self.nodes[sibling].aabb.union(&leaf_aabb);
+
+        let new_parent = self.alloc_node(new_parent_node);
+
+        self.nodes[new_parent].left = sibling;
+        self.nodes[new_parent].right = leaf;
+        self.nodes[sibling].parent = new_parent;
+        self.nodes[leaf].parent = new_parent;
+
+        if old_parent != NULL_PTR {
+            if self.nodes[old_parent].left == sibling {
+                self.nodes[old_parent].left = new_parent;
+            } else {
+                self.nodes[old_parent].right = new_parent;
+            }
+        } else {
+            self.root = new_parent;
+        }
+
+        self.refit(self.nodes[leaf].parent);
+    }
+
+    fn sah(&mut self, leaf_aabb: AABB) -> usize {
         let mut search_idx = self.root;
 
         while !self.nodes[search_idx].is_leaf {
@@ -118,31 +150,27 @@ impl DynamicBVH {
             }
         }
 
-        let sibling = search_idx;
-        let old_parent = self.nodes[sibling].parent;
+        search_idx
+    }
 
-        let mut new_parent_node = TreeNode::new_internal();
-        new_parent_node.parent = old_parent;
-        new_parent_node.aabb = self.nodes[sibling].aabb.union(&leaf_aabb);
+    fn greedy_sah(&mut self, leaf_aabb: AABB) -> usize {
+        let mut search_idx = self.root;
 
-        let new_parent = self.alloc_node(new_parent_node);
+        while !self.nodes[search_idx].is_leaf {
+            let left = self.nodes[search_idx].left;
+            let right = self.nodes[search_idx].right;
 
-        self.nodes[new_parent].left = sibling;
-        self.nodes[new_parent].right = leaf;
-        self.nodes[sibling].parent = new_parent;
-        self.nodes[leaf].parent = new_parent;
+            let cost_left = self.nodes[left].aabb.union(&leaf_aabb).perimeter();
+            let cost_right = self.nodes[right].aabb.union(&leaf_aabb).perimeter();
 
-        if old_parent != NULL_PTR {
-            if self.nodes[old_parent].left == sibling {
-                self.nodes[old_parent].left = new_parent;
+            if cost_left < cost_right {
+                search_idx = left;
             } else {
-                self.nodes[old_parent].right = new_parent;
+                search_idx = right;
             }
-        } else {
-            self.root = new_parent;
         }
 
-        self.refit(self.nodes[leaf].parent);
+        search_idx
     }
 
     pub fn remove_leaf(&mut self, leaf: usize) {
@@ -182,11 +210,108 @@ impl DynamicBVH {
     fn refit(&mut self, idx: usize) {
         let mut curr_idx = idx;
         while curr_idx != NULL_PTR {
+            curr_idx = self.rotate(curr_idx);
+
             let left = self.nodes[curr_idx].left;
             let right = self.nodes[curr_idx].right;
+
             self.nodes[curr_idx].aabb = self.nodes[left].aabb.union(&self.nodes[right].aabb);
+            self.nodes[curr_idx].height = self.nodes[left].height.max(self.nodes[right].height) + 1;
+
             curr_idx = self.nodes[curr_idx].parent;
         }
+    }
+
+    fn rotate(&mut self, i_a: usize) -> usize {
+        if i_a == NULL_PTR || self.nodes[i_a].is_leaf || self.nodes[i_a].height < 2 {
+            return i_a;
+        }
+
+        let i_b = self.nodes[i_a].left;
+        let i_c = self.nodes[i_a].right;
+
+        let height_b = self.nodes[i_b].height;
+        let height_c = self.nodes[i_c].height;
+
+        if height_b > height_c {
+            let i_d = self.nodes[i_b].left;
+            let i_e = self.nodes[i_b].right;
+
+            let aabb_c = self.nodes[i_c].aabb;
+            let aabb_d = self.nodes[i_d].aabb;
+            let aabb_e = self.nodes[i_e].aabb;
+
+            let cost_ce = aabb_c.union(&aabb_e).perimeter();
+            let cost_cd = aabb_c.union(&aabb_d).perimeter();
+            let cost_orig = self.nodes[i_b].aabb.perimeter();
+
+            if cost_cd < cost_ce && cost_cd < cost_orig {
+                self.nodes[i_a].right = i_d;
+                self.nodes[i_d].parent = i_a;
+
+                self.nodes[i_b].left = i_c;
+                self.nodes[i_c].parent = i_b;
+
+                self.nodes[i_b].aabb = self.nodes[i_c].aabb.union(&self.nodes[i_e].aabb);
+                self.nodes[i_b].height = 1 + self.nodes[i_c].height.max(self.nodes[i_e].height);
+
+                return i_a;
+            }
+
+            if cost_ce < cost_cd && cost_ce < cost_orig {
+                self.nodes[i_a].right = i_e;
+                self.nodes[i_e].parent = i_a;
+
+                self.nodes[i_b].right = i_c;
+                self.nodes[i_c].parent = i_b;
+
+                self.nodes[i_b].aabb = self.nodes[i_d].aabb.union(&self.nodes[i_c].aabb);
+                self.nodes[i_b].height = 1 + self.nodes[i_d].height.max(self.nodes[i_c].height);
+
+                return i_a;
+            }
+        }
+
+        if height_c > height_b {
+            let i_f = self.nodes[i_c].left;
+            let i_g = self.nodes[i_c].right;
+
+            let aabb_b = self.nodes[i_b].aabb;
+            let aabb_f = self.nodes[i_f].aabb;
+            let aabb_g = self.nodes[i_g].aabb;
+
+            let cost_bf = aabb_b.union(&aabb_f).perimeter();
+            let cost_bg = aabb_b.union(&aabb_g).perimeter();
+            let cost_orig = self.nodes[i_c].aabb.perimeter();
+
+            if cost_bf < cost_bg && cost_bf < cost_orig {
+                self.nodes[i_a].left = i_f;
+                self.nodes[i_f].parent = i_a;
+
+                self.nodes[i_c].left = i_b;
+                self.nodes[i_b].parent = i_c;
+
+                self.nodes[i_c].aabb = self.nodes[i_b].aabb.union(&self.nodes[i_g].aabb);
+                self.nodes[i_c].height = self.nodes[i_b].height.max(self.nodes[i_g].height) + 1;
+
+                return i_a;
+            }
+
+            if cost_bg < cost_bf && cost_bg < cost_orig {
+                self.nodes[i_a].left = i_g;
+                self.nodes[i_g].parent = i_a;
+
+                self.nodes[i_c].right = i_b;
+                self.nodes[i_b].parent = i_c;
+
+                self.nodes[i_c].aabb = self.nodes[i_f].aabb.union(&self.nodes[i_b].aabb);
+                self.nodes[i_c].height = self.nodes[i_f].height.max(self.nodes[i_b].height) + 1;
+
+                return i_a;
+            }
+        }
+
+        i_a
     }
 
     pub fn query(&self, target_aabb: &AABB) -> Vec<usize> {

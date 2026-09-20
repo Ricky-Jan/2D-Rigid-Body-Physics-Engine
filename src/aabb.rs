@@ -35,7 +35,8 @@ impl AABB {
     pub fn perimeter(&self) -> f64 {
         let width = self.max.x - self.min.x;
         let height = self.max.y - self.min.y;
-        2.0 * (width + height)
+        width * height
+        // 2.0 * (width + height)
     }
 
     pub fn fat_aabb(&self, vel: &Vec2, predict_rate: f64, fatness: f64) -> Self {

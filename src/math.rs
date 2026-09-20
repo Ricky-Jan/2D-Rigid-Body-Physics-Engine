@@ -63,4 +63,17 @@ impl Complex {
     pub fn new(re: f64, im: f64) -> Self {
         Self { re, im }
     }
+
+    #[inline(always)]
+    pub fn rotate(&self, v: &Vec2) -> Vec2 {
+        Vec2::new(v.x * self.re - v.y * self.im, v.x * self.im + v.y * self.re)
+    }
+
+    #[inline(always)]
+    pub fn inv_rotate(&self, v: &Vec2) -> Vec2 {
+        Vec2::new(
+            v.x * self.re + v.y * self.im,
+            -v.x * self.im + v.y * self.re,
+        )
+    }
 }
