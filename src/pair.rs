@@ -1,5 +1,5 @@
 use crate::{
-    collision::Collision,
+    arbiter::Arbiter,
     math::{PRIME_A, PRIME_B},
 };
 
@@ -7,7 +7,7 @@ pub const NULL_PTR: usize = usize::MAX;
 pub const HASH_SIZE: usize = 4096;
 
 pub struct PairNode {
-    pub col: Collision,
+    pub arbiter: Arbiter,
     pub next: usize,
     pub prev: usize,
     pub active_idx: usize,
@@ -42,7 +42,7 @@ impl Pair {
             idx
         } else {
             self.pool.push(PairNode {
-                col: Collision::new_pair(0, 0),
+                arbiter: Arbiter::new(0, 0),
                 next: NULL_PTR,
                 prev: NULL_PTR,
                 active_idx: NULL_PTR,
@@ -63,14 +63,14 @@ impl Pair {
 
         let mut curr = self.hash_table[bucket];
         while curr != NULL_PTR {
-            if self.pool[curr].col.body_a_idx == a && self.pool[curr].col.body_b_idx == b {
+            if self.pool[curr].arbiter.body_a_idx == a && self.pool[curr].arbiter.body_b_idx == b {
                 return curr;
             }
             curr = self.pool[curr].next;
         }
 
         let idx = self.alloc_node();
-        self.pool[idx].col = Collision::new_pair(a, b);
+        self.pool[idx].arbiter = Arbiter::new(a, b);
 
         self.pool[idx].prev = NULL_PTR;
         self.pool[idx].next = self.hash_table[bucket];
@@ -89,8 +89,8 @@ impl Pair {
     pub fn remove(&mut self, idx: usize) {
         let prev = self.pool[idx].prev;
         let next = self.pool[idx].next;
-        let a = self.pool[idx].col.body_a_idx;
-        let b = self.pool[idx].col.body_b_idx;
+        let a = self.pool[idx].arbiter.body_a_idx;
+        let b = self.pool[idx].arbiter.body_b_idx;
 
         if prev == NULL_PTR {
             let bucket = Self::hash(a, b);

@@ -84,7 +84,7 @@ impl World {
     pub fn add_shape(&mut self, shape_type: ShapeType, body_ptr: usize) -> usize {
         let mut shape = Shape::new(shape_type, body_ptr);
         let body = &self.bodies[body_ptr];
-        shape.refresh_transform(body); // 建立時立刻對齊本體 Transform
+        shape.refresh_transform(body);
 
         let shape_idx;
         if let Some(free_idx) = self.shapes_free_list.pop() {
@@ -111,7 +111,6 @@ impl World {
         self.apply_forces();
         self.broad_phase();
         self.narrow_phase();
-        self.warm_start();
         self.resolve_collisions();
         self.integrate_position();
     }
@@ -119,7 +118,7 @@ impl World {
     fn sync_shapes(&mut self) {
         for &shape_idx in &self.shape_all_list {
             let body_ptr = self.shapes[shape_idx].body_ptr;
-            let body = &self.bodies[body_ptr]; // 透過 Disjoint borrows 安全取用
+            let body = &self.bodies[body_ptr];
             self.shapes[shape_idx].refresh_transform(body);
         }
     }
@@ -189,26 +188,32 @@ impl World {
         while i > 0 {
             i -= 1;
             let pool_idx = self.pair.active_pairs[i];
-            let col = &mut self.pair.pool[pool_idx].col;
+            let arbiter = &mut self.pair.pool[pool_idx].arbiter;
 
-            let shape_a_idx = self.bodies[col.body_a_idx].shape_ptr;
-            let shape_b_idx = self.bodies[col.body_b_idx].shape_ptr;
+            let shape_a_idx = self.bodies[arbiter.body_a_idx].shape_ptr;
+            let shape_b_idx = self.bodies[arbiter.body_b_idx].shape_ptr;
 
             let shape_a = &self.shapes[shape_a_idx];
             let shape_b = &self.shapes[shape_b_idx];
 
+            let mut is_colliding = false;
+
             if shape_a.aabb.intersect(&shape_b.aabb) {
-                let is_colliding = col.is_colliding(shape_a, shape_b);
+                is_colliding = crate::collision::collide(&mut arbiter.manifold, shape_a, shape_b);
 
                 if is_colliding {
-                    let body_a = &self.bodies[col.body_a_idx];
-                    let body_b = &self.bodies[col.body_b_idx];
-                    col.init_collision(&self.context, body_a, body_b);
+                    let body_a = &self.bodies[arbiter.body_a_idx];
+                    let body_b = &self.bodies[arbiter.body_b_idx];
+                    arbiter.init(&self.context, body_a, body_b);
                     self.pair_colliding_list.push(pool_idx);
                 }
-            } else {
-                col.contact.prev_jn = 0.0;
-                col.contact.prev_jt = 0.0;
+            }
+
+            if !is_colliding {
+                for i in 0..2 {
+                    arbiter.states[i].prev_jn = 0.0;
+                    arbiter.states[i].prev_jt = 0.0;
+                }
                 if !shape_a.fat_aabb.intersect(&shape_b.fat_aabb) {
                     self.pair.remove(pool_idx);
                 }
@@ -216,36 +221,30 @@ impl World {
         }
     }
 
-    fn warm_start(&mut self) {
+    fn resolve_collisions(&mut self) {
         for &pool_idx in &self.pair_colliding_list {
-            let col = &mut self.pair.pool[pool_idx].col;
-            let contact = &col.contact;
-            let impulse = contact
-                .normal
-                .scale(contact.prev_jn)
-                .add(&Vec2::cross_sv(contact.prev_jt, &contact.normal));
+            let arbiter = &self.pair.pool[pool_idx].arbiter;
 
-            let (left, right) = self.bodies.split_at_mut(col.body_b_idx);
-            let body_a = &mut left[col.body_a_idx];
+            let idx_a = arbiter.body_a_idx;
+            let idx_b = arbiter.body_b_idx;
+            let (left, right) = self.bodies.split_at_mut(idx_b);
+            let body_a = &mut left[idx_a];
             let body_b = &mut right[0];
 
-            body_a.apply_impulse(&impulse.reverse(), &contact.rA);
-            body_b.apply_impulse(&impulse, &contact.rB);
+            arbiter.warm_start(body_a, body_b);
         }
-    }
 
-    fn resolve_collisions(&mut self) {
         for _ in 0..SOLVER_ITER {
             for &pool_idx in &self.pair_colliding_list {
-                let col = &mut self.pair.pool[pool_idx].col;
+                let arbiter = &mut self.pair.pool[pool_idx].arbiter;
 
-                let idx_a = col.body_a_idx;
-                let idx_b = col.body_b_idx;
+                let idx_a = arbiter.body_a_idx;
+                let idx_b = arbiter.body_b_idx;
                 let (left, right) = self.bodies.split_at_mut(idx_b);
                 let body_a = &mut left[idx_a];
                 let body_b = &mut right[0];
 
-                col.resolve_collision(body_a, body_b);
+                arbiter.resolve(body_a, body_b);
             }
         }
     }

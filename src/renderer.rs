@@ -279,14 +279,16 @@ impl Renderer {
 
     fn draw_contact_points(&self, world: &World, camera: &Camera, color: Color, size: f32) {
         for &pool_idx in &world.pair_colliding_list {
-            let col = world.pair.pool[pool_idx].col;
-            let shape_a_idx = world.bodies[col.body_a_idx].shape_ptr;
-            let shape_b_idx = world.bodies[col.body_b_idx].shape_ptr;
+            let arbiter = &world.pair.pool[pool_idx].arbiter;
+            let shape_a_idx = world.bodies[arbiter.body_a_idx].shape_ptr;
+            let shape_b_idx = world.bodies[arbiter.body_b_idx].shape_ptr;
 
             if self.visible_mask[shape_a_idx] || self.visible_mask[shape_b_idx] {
-                let contact_pos = col.contact.pos;
-                let scr_pos = camera.transform_pos(&contact_pos);
-                draw_circle(scr_pos.x as f32, scr_pos.y as f32, size, color);
+                for i in 0..arbiter.manifold.point_count {
+                    let contact_pos = arbiter.manifold.points[i].pos;
+                    let scr_pos = camera.transform_pos(&contact_pos);
+                    draw_circle(scr_pos.x as f32, scr_pos.y as f32, size, color);
+                }
             }
         }
     }
@@ -300,24 +302,27 @@ impl Renderer {
         min_length: f64,
     ) {
         for &pool_idx in &world.pair_colliding_list {
-            let col = world.pair.pool[pool_idx].col;
-            let shape_a_idx = world.bodies[col.body_a_idx].shape_ptr;
-            let shape_b_idx = world.bodies[col.body_b_idx].shape_ptr;
+            let arbiter = &world.pair.pool[pool_idx].arbiter;
+            let shape_a_idx = world.bodies[arbiter.body_a_idx].shape_ptr;
+            let shape_b_idx = world.bodies[arbiter.body_b_idx].shape_ptr;
 
             if self.visible_mask[shape_a_idx] || self.visible_mask[shape_b_idx] {
-                let contact_pos = col.contact.pos;
-                let scr_start = camera.transform_pos(&contact_pos);
-                let len = col.contact.penetration.max(min_length);
-                let line_end = col.contact.pos.add(&col.contact.normal.scale(len));
-                let scr_end = camera.transform_pos(&line_end);
-                draw_line(
-                    scr_start.x as f32,
-                    scr_start.y as f32,
-                    scr_end.x as f32,
-                    scr_end.y as f32,
-                    thickness,
-                    color,
-                );
+                for i in 0..arbiter.manifold.point_count {
+                    let contact = arbiter.manifold.points[i];
+                    let contact_pos = contact.pos;
+                    let scr_start = camera.transform_pos(&contact_pos);
+                    let len = contact.penetration.max(min_length);
+                    let line_end = contact.pos.add(&arbiter.manifold.normal.scale(len));
+                    let scr_end = camera.transform_pos(&line_end);
+                    draw_line(
+                        scr_start.x as f32,
+                        scr_start.y as f32,
+                        scr_end.x as f32,
+                        scr_end.y as f32,
+                        thickness,
+                        color,
+                    );
+                }
             }
         }
     }
