@@ -1,4 +1,10 @@
-use crate::{aabb::AABB, bvh::NULL_PTR, math::Vec2, shape::ShapeType, world::World};
+use crate::{
+    aabb::AABB,
+    bvh::NULL_PTR,
+    math::Vec2,
+    shape::{MAX_POLY_VERTICES, ShapeType},
+    world::World,
+};
 use macroquad::prelude::*;
 
 pub struct Camera {
@@ -90,6 +96,7 @@ impl Renderer {
 
         self.draw_circle_bodies(world, camera, color, thickness);
         self.draw_rect_bodies(world, camera, color, thickness);
+        self.draw_poly_bodies(world, camera, color, thickness);
     }
 
     fn draw_circle_bodies(&self, world: &World, camera: &Camera, color: Color, thickness: f32) {
@@ -123,20 +130,10 @@ impl Renderer {
 
             let shape = &world.shapes[shape_idx];
             if let ShapeType::Rect(rect) = shape.shape_type {
-                let hw = rect.hw;
-                let hh = rect.hh;
-
-                let loc_v = [
-                    Vec2::new(-hw, hh),
-                    Vec2::new(-hw, -hh),
-                    Vec2::new(hw, -hh),
-                    Vec2::new(hw, hh),
-                ];
-
                 let mut scr_v = [Vec2::zero(); 4];
+
                 for i in 0..4 {
-                    let world_pos = shape.pos.add(&shape.heading.rotate(&loc_v[i]));
-                    scr_v[i] = camera.transform_pos(&world_pos);
+                    scr_v[i] = camera.transform_pos(&rect.world_vertices[i]);
                 }
 
                 for i in 0..4 {
@@ -154,11 +151,40 @@ impl Renderer {
         }
     }
 
+    fn draw_poly_bodies(&self, world: &World, camera: &Camera, color: Color, thickness: f32) {
+        for &shape_idx in &world.poly_all_list {
+            if !self.visible_mask[shape_idx] {
+                continue;
+            }
+
+            let shape = &world.shapes[shape_idx];
+            if let ShapeType::Polygon(poly) = shape.shape_type {
+                let mut scr_v = [Vec2::zero(); MAX_POLY_VERTICES];
+
+                for i in 0..poly.count {
+                    scr_v[i] = camera.transform_pos(&poly.world_vertices[i]);
+                }
+
+                for i in 0..poly.count {
+                    let next_i = (i + 1) % poly.count;
+                    draw_line(
+                        scr_v[i].x as f32,
+                        scr_v[i].y as f32,
+                        scr_v[next_i].x as f32,
+                        scr_v[next_i].y as f32,
+                        thickness,
+                        color,
+                    );
+                }
+            }
+        }
+    }
+
     fn debug_renderer(&self, world: &World, camera: &Camera) {
         // self.draw_shape_aabbs(world, camera, Color::new(0.0, 1.0, 0.0, 1.0), 1.0);
         // self.draw_bvh_aabbs(world, camera, Color::new(1.0, 1.0, 1.0, 0.2), 1.0);
-        self.draw_penetrations(world, camera, Color::new(1.0, 1.0, 0.0, 1.0), 1.0, 4.0);
-        self.draw_contact_points(world, camera, Color::new(0.0, 1.0, 1.0, 1.0), 2.0);
+        // self.draw_penetrations(world, camera, Color::new(1.0, 1.0, 0.0, 1.0), 1.0, 4.0);
+        // self.draw_contact_points(world, camera, Color::new(0.0, 1.0, 1.0, 1.0), 2.0);
 
         // self.draw_bvh_branches(
         //     world,

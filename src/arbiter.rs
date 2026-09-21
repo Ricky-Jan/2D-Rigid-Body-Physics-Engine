@@ -1,4 +1,9 @@
-use crate::{collision::Manifold, math::Vec2, rigidbody::RigidBody, world::PhysicsContext};
+use crate::{
+    collision::{FeatureCache, Manifold},
+    math::Vec2,
+    rigidbody::RigidBody,
+    world::PhysicsContext,
+};
 
 #[derive(Clone, Copy)]
 pub struct SolverState {
@@ -39,6 +44,7 @@ pub struct Arbiter {
     pub states: [SolverState; 2],
     pub friction: f64,
     pub restitution: f64,
+    pub cache: FeatureCache,
 }
 
 impl Arbiter {
@@ -50,6 +56,7 @@ impl Arbiter {
             states: [SolverState::empty(); 2],
             friction: 0.0,
             restitution: 0.0,
+            cache: FeatureCache::new(),
         }
     }
 

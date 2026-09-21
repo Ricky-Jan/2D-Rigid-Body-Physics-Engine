@@ -1,11 +1,12 @@
 use crate::{
     aabb::AABB,
     bvh::{DynamicBVH, NULL_PTR, TreeNode},
-    math::{TWO_PI, Vec2},
+    collision::collide,
+    math::{Complex, TWO_PI, Vec2},
     pair::Pair,
     rigidbody::RigidBody,
     settings::*,
-    shape::{Shape, ShapeType},
+    shape::{Circle, Polygon, Rect, Shape, ShapeType},
 };
 
 pub struct World {
@@ -16,6 +17,7 @@ pub struct World {
     pub shape_all_list: Vec<usize>,
     pub circle_all_list: Vec<usize>,
     pub rect_all_list: Vec<usize>,
+    pub poly_all_list: Vec<usize>,
     pub bodies_free_list: Vec<usize>,
     pub bodies_active_list: Vec<usize>,
     pub pair: Pair,
@@ -49,6 +51,7 @@ impl World {
             shape_all_list: Vec::new(),
             circle_all_list: Vec::new(),
             rect_all_list: Vec::new(),
+            poly_all_list: Vec::new(),
             bodies_free_list: Vec::new(),
             bodies_active_list: Vec::new(),
             pair: Pair::new(),
@@ -62,6 +65,86 @@ impl World {
         let zeta = 2.0 * damping + omega * self.context.dt;
         self.context.impulse_damping = 1.0 + (1.0 / (omega * zeta) * self.context.dt);
         self.context.bias = omega / zeta;
+    }
+
+    pub fn create_circle(
+        &mut self,
+        x: f64,
+        y: f64,
+        radius: f64,
+        angle: f64,
+        density: f64,
+    ) -> usize {
+        let mut body = RigidBody::new(density);
+        body.set_pos(Vec2::new(x, y));
+        body.set_angle(angle);
+        body.calc_circle_properties(radius);
+
+        let body_index = self.add_body(body);
+        let circle = Circle::new(radius);
+        self.add_shape(ShapeType::Circle(circle), body_index);
+        body_index
+    }
+
+    pub fn create_rect(
+        &mut self,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+        angle: f64,
+        density: f64,
+    ) -> usize {
+        let mut body = RigidBody::new(density);
+        body.set_pos(Vec2::new(x, y));
+        body.set_angle(angle);
+        body.calc_rect_properties(width, height);
+
+        let body_index = self.add_body(body);
+        let rect = Rect::new(width, height);
+        self.add_shape(ShapeType::Rect(rect), body_index);
+        body_index
+    }
+
+    pub fn create_regular_polygon(
+        &mut self,
+        x: f64,
+        y: f64,
+        sides: usize,
+        radius: f64,
+        angle: f64,
+        density: f64,
+    ) -> usize {
+        let mut poly = Polygon::new_regular(sides, radius);
+        let mut body = RigidBody::new(density);
+        body.set_pos(Vec2::new(x, y));
+        body.set_angle(angle);
+
+        body.calc_polygon_properties(&mut poly, density, true);
+
+        let body_index = self.add_body(body);
+        self.add_shape(ShapeType::Polygon(poly), body_index);
+        body_index
+    }
+
+    pub fn create_custom_polygon(
+        &mut self,
+        x: f64,
+        y: f64,
+        vertices: &[Vec2],
+        angle: f64,
+        density: f64,
+    ) -> usize {
+        let mut poly = Polygon::new_custom(vertices);
+        let mut body = RigidBody::new(density);
+        body.set_pos(Vec2::new(x, y));
+        body.set_angle(angle);
+
+        body.calc_polygon_properties(&mut poly, density, false);
+
+        let body_index = self.add_body(body);
+        self.add_shape(ShapeType::Polygon(poly), body_index);
+        body_index
     }
 
     pub fn add_body(&mut self, body: RigidBody) -> usize {
@@ -101,6 +184,7 @@ impl World {
         match shape_type {
             ShapeType::Circle(_) => self.circle_all_list.push(shape_idx),
             ShapeType::Rect(_) => self.rect_all_list.push(shape_idx),
+            ShapeType::Polygon(_) => self.poly_all_list.push(shape_idx),
         }
 
         shape_idx
@@ -199,7 +283,7 @@ impl World {
             let mut is_colliding = false;
 
             if shape_a.aabb.intersect(&shape_b.aabb) {
-                is_colliding = crate::collision::collide(&mut arbiter.manifold, shape_a, shape_b);
+                is_colliding = collide(&mut arbiter.manifold, shape_a, shape_b, &mut arbiter.cache);
 
                 if is_colliding {
                     let body_a = &self.bodies[arbiter.body_a_idx];
@@ -210,10 +294,7 @@ impl World {
             }
 
             if !is_colliding {
-                for i in 0..2 {
-                    arbiter.states[i].prev_jn = 0.0;
-                    arbiter.states[i].prev_jt = 0.0;
-                }
+                arbiter.manifold.point_count = 0;
                 if !shape_a.fat_aabb.intersect(&shape_b.fat_aabb) {
                     self.pair.remove(pool_idx);
                 }
@@ -252,8 +333,13 @@ impl World {
     fn integrate_position(&mut self) {
         for &body_idx in &self.bodies_active_list {
             let body = &mut self.bodies[body_idx];
-            body.set_pos(body.pos.add(&body.vel.scale(self.context.dt)));
-            body.set_angle(body.angle + body.ang_vel * self.context.dt);
+
+            body.centroid = body.centroid.add(&body.vel.scale(self.context.dt));
+            body.angle = (body.angle + body.ang_vel * self.context.dt) % TWO_PI;
+            body.heading = Complex::new(body.angle.cos(), body.angle.sin());
+
+            let rotated_loc = body.heading.rotate(&body.loc_centroid);
+            body.pos = body.centroid.sub(&rotated_loc);
         }
     }
 }

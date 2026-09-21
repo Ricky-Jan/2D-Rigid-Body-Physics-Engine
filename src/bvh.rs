@@ -126,8 +126,8 @@ impl DynamicBVH {
             let cost_left = if self.nodes[left].is_leaf {
                 self.nodes[left].aabb.union(&leaf_aabb).perimeter() + cost_inherit
             } else {
-                let old_area = self.nodes[right].aabb.perimeter();
-                let new_area = self.nodes[right].aabb.union(&leaf_aabb).perimeter();
+                let old_area = self.nodes[left].aabb.perimeter();
+                let new_area = self.nodes[left].aabb.union(&leaf_aabb).perimeter();
                 (new_area - old_area) + cost_inherit
             };
 

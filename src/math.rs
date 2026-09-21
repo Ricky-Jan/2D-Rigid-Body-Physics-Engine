@@ -1,3 +1,4 @@
+pub const EPS: f64 = 1e-6f64;
 pub const PI: f64 = std::f64::consts::PI;
 pub const TWO_PI: f64 = 2.0 * PI;
 pub const POS_INF: f64 = f64::INFINITY;
@@ -50,6 +51,10 @@ impl Vec2 {
 
     pub fn reverse(&self) -> Self {
         Self::new(-self.x, -self.y)
+    }
+
+    pub fn normal(&self) -> Self {
+        Self::new(self.y, -self.x)
     }
 }
 
