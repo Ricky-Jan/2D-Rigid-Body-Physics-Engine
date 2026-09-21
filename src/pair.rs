@@ -42,7 +42,7 @@ impl Pair {
             idx
         } else {
             self.pool.push(PairNode {
-                arbiter: Arbiter::new(0, 0),
+                arbiter: Arbiter::new(0, 0, 0, 0),
                 next: NULL_PTR,
                 prev: NULL_PTR,
                 active_idx: NULL_PTR,
@@ -52,25 +52,27 @@ impl Pair {
         }
     }
 
-    pub fn get(&mut self, body_a: usize, body_b: usize) -> usize {
-        let (a, b) = if body_a < body_b {
-            (body_a, body_b)
+    pub fn get(&mut self, shape_a: usize, shape_b: usize, body_a: usize, body_b: usize) -> usize {
+        let (sa, sb, ba, bb) = if shape_a < shape_b {
+            (shape_a, shape_b, body_a, body_b)
         } else {
-            (body_b, body_a)
+            (shape_b, shape_a, body_b, body_a)
         };
 
-        let bucket = Self::hash(a, b);
+        let bucket = Self::hash(sa, sb);
 
         let mut curr = self.hash_table[bucket];
         while curr != NULL_PTR {
-            if self.pool[curr].arbiter.body_a_idx == a && self.pool[curr].arbiter.body_b_idx == b {
+            if self.pool[curr].arbiter.shape_a_idx == sa
+                && self.pool[curr].arbiter.shape_b_idx == sb
+            {
                 return curr;
             }
             curr = self.pool[curr].next;
         }
 
         let idx = self.alloc_node();
-        self.pool[idx].arbiter = Arbiter::new(a, b);
+        self.pool[idx].arbiter = Arbiter::new(sa, sb, ba, bb);
 
         self.pool[idx].prev = NULL_PTR;
         self.pool[idx].next = self.hash_table[bucket];
@@ -89,8 +91,8 @@ impl Pair {
     pub fn remove(&mut self, idx: usize) {
         let prev = self.pool[idx].prev;
         let next = self.pool[idx].next;
-        let a = self.pool[idx].arbiter.body_a_idx;
-        let b = self.pool[idx].arbiter.body_b_idx;
+        let a = self.pool[idx].arbiter.shape_a_idx;
+        let b = self.pool[idx].arbiter.shape_b_idx;
 
         if prev == NULL_PTR {
             let bucket = Self::hash(a, b);

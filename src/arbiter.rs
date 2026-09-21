@@ -40,6 +40,9 @@ impl SolverState {
 pub struct Arbiter {
     pub body_a_idx: usize,
     pub body_b_idx: usize,
+    pub shape_a_idx: usize,
+    pub shape_b_idx: usize,
+
     pub manifold: Manifold,
     pub states: [SolverState; 2],
     pub friction: f64,
@@ -48,8 +51,15 @@ pub struct Arbiter {
 }
 
 impl Arbiter {
-    pub fn new(body_a_idx: usize, body_b_idx: usize) -> Self {
+    pub fn new(
+        shape_a_idx: usize,
+        shape_b_idx: usize,
+        body_a_idx: usize,
+        body_b_idx: usize,
+    ) -> Self {
         Self {
+            shape_a_idx,
+            shape_b_idx,
             body_a_idx,
             body_b_idx,
             manifold: Manifold::new(),

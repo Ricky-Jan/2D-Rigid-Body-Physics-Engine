@@ -2,7 +2,7 @@ use crate::{
     aabb::AABB,
     bvh::{DynamicBVH, NULL_PTR, TreeNode},
     collision::collide,
-    math::{Complex, TWO_PI, Vec2},
+    math::{Complex, EPS, TWO_PI, Vec2},
     pair::Pair,
     rigidbody::RigidBody,
     settings::*,
@@ -67,6 +67,106 @@ impl World {
         self.context.bias = omega / zeta;
     }
 
+    pub fn create_body(&mut self, x: f64, y: f64, angle: f64, density: f64) -> usize {
+        let mut body = RigidBody::new(density);
+        body.set_pos(Vec2::new(x, y));
+        body.set_angle(angle);
+
+        let index;
+        if let Some(free_idx) = self.bodies_free_list.pop() {
+            index = free_idx;
+            self.bodies[index] = body;
+        } else {
+            index = self.bodies.len();
+            self.bodies.push(body);
+        }
+        index
+    }
+
+    pub fn add_shape(
+        &mut self,
+        body_ptr: usize,
+        shape_type: ShapeType,
+        local_pos: Vec2,
+        local_angle: f64,
+    ) -> usize {
+        let mut shape = Shape::new(shape_type, body_ptr, local_pos, local_angle);
+
+        let shape_idx;
+        if let Some(free_idx) = self.shapes_free_list.pop() {
+            shape_idx = free_idx;
+            self.shapes[shape_idx] = shape;
+        } else {
+            shape_idx = self.shapes.len();
+            self.shapes.push(shape);
+        }
+
+        let body = &mut self.bodies[body_ptr];
+        self.shapes[shape_idx].next = body.shape_head;
+        body.shape_head = shape_idx;
+
+        self.shape_all_list.push(shape_idx);
+        match shape_type {
+            ShapeType::Circle(_) => self.circle_all_list.push(shape_idx),
+            ShapeType::Rect(_) => self.rect_all_list.push(shape_idx),
+            ShapeType::Polygon(_) => self.poly_all_list.push(shape_idx),
+        }
+
+        shape_idx
+    }
+
+    pub fn finalize_body(&mut self, body_ptr: usize) {
+        let density = self.bodies[body_ptr].density;
+        let mut total_mass = 0.0;
+        let mut com_numerator = Vec2::zero();
+
+        let mut curr = self.bodies[body_ptr].shape_head;
+        while curr != NULL_PTR {
+            let shape = &self.shapes[curr];
+            let props = shape.get_properties(density);
+
+            total_mass += props.mass;
+            com_numerator = com_numerator.add(&props.local_centroid.scale(props.mass));
+
+            curr = shape.next;
+        }
+
+        let loc_centroid = if total_mass > EPS {
+            com_numerator.scale(1.0 / total_mass)
+        } else {
+            Vec2::zero()
+        };
+
+        let mut total_inertia = 0.0;
+        let mut curr = self.bodies[body_ptr].shape_head;
+        while curr != NULL_PTR {
+            let shape = &self.shapes[curr];
+            let props = shape.get_properties(density);
+
+            let dist_sq = props.local_centroid.sub(&loc_centroid).dist_sq();
+            total_inertia += props.inertia + props.mass * dist_sq;
+
+            curr = shape.next;
+        }
+
+        let body = &mut self.bodies[body_ptr];
+        body.loc_centroid = loc_centroid;
+        body.is_regular = loc_centroid.dist_sq() < EPS;
+
+        if total_mass > EPS {
+            body.inv_m = 1.0 / total_mass;
+            body.inv_i = 1.0 / total_inertia;
+            if !self.bodies_active_list.contains(&body_ptr) {
+                self.bodies_active_list.push(body_ptr);
+            }
+        } else {
+            body.inv_m = 0.0;
+            body.inv_i = 0.0;
+        }
+
+        body.centroid = body.pos.add(&body.heading.rotate(&body.loc_centroid));
+    }
+
     pub fn create_circle(
         &mut self,
         x: f64,
@@ -75,15 +175,15 @@ impl World {
         angle: f64,
         density: f64,
     ) -> usize {
-        let mut body = RigidBody::new(density);
-        body.set_pos(Vec2::new(x, y));
-        body.set_angle(angle);
-        body.calc_circle_properties(radius);
-
-        let body_index = self.add_body(body);
-        let circle = Circle::new(radius);
-        self.add_shape(ShapeType::Circle(circle), body_index);
-        body_index
+        let body_idx = self.create_body(x, y, angle, density);
+        self.add_shape(
+            body_idx,
+            ShapeType::Circle(Circle::new(radius)),
+            Vec2::zero(),
+            0.0,
+        );
+        self.finalize_body(body_idx);
+        body_idx
     }
 
     pub fn create_rect(
@@ -95,15 +195,15 @@ impl World {
         angle: f64,
         density: f64,
     ) -> usize {
-        let mut body = RigidBody::new(density);
-        body.set_pos(Vec2::new(x, y));
-        body.set_angle(angle);
-        body.calc_rect_properties(width, height);
-
-        let body_index = self.add_body(body);
-        let rect = Rect::new(width, height);
-        self.add_shape(ShapeType::Rect(rect), body_index);
-        body_index
+        let body_idx = self.create_body(x, y, angle, density);
+        self.add_shape(
+            body_idx,
+            ShapeType::Rect(Rect::new(width, height)),
+            Vec2::zero(),
+            0.0,
+        );
+        self.finalize_body(body_idx);
+        body_idx
     }
 
     pub fn create_regular_polygon(
@@ -115,16 +215,15 @@ impl World {
         angle: f64,
         density: f64,
     ) -> usize {
-        let mut poly = Polygon::new_regular(sides, radius);
-        let mut body = RigidBody::new(density);
-        body.set_pos(Vec2::new(x, y));
-        body.set_angle(angle);
-
-        body.calc_polygon_properties(&mut poly, density, true);
-
-        let body_index = self.add_body(body);
-        self.add_shape(ShapeType::Polygon(poly), body_index);
-        body_index
+        let body_idx = self.create_body(x, y, angle, density);
+        self.add_shape(
+            body_idx,
+            ShapeType::Polygon(Polygon::new_regular(sides, radius)),
+            Vec2::zero(),
+            0.0,
+        );
+        self.finalize_body(body_idx);
+        body_idx
     }
 
     pub fn create_custom_polygon(
@@ -135,59 +234,15 @@ impl World {
         angle: f64,
         density: f64,
     ) -> usize {
-        let mut poly = Polygon::new_custom(vertices);
-        let mut body = RigidBody::new(density);
-        body.set_pos(Vec2::new(x, y));
-        body.set_angle(angle);
-
-        body.calc_polygon_properties(&mut poly, density, false);
-
-        let body_index = self.add_body(body);
-        self.add_shape(ShapeType::Polygon(poly), body_index);
-        body_index
-    }
-
-    pub fn add_body(&mut self, body: RigidBody) -> usize {
-        let is_active = body.inv_m > 0.0;
-        let index;
-        if let Some(free_idx) = self.bodies_free_list.pop() {
-            index = free_idx;
-            self.bodies[index] = body;
-        } else {
-            index = self.bodies.len();
-            self.bodies.push(body);
-        }
-
-        if is_active {
-            self.bodies_active_list.push(index);
-        }
-        index
-    }
-
-    pub fn add_shape(&mut self, shape_type: ShapeType, body_ptr: usize) -> usize {
-        let mut shape = Shape::new(shape_type, body_ptr);
-        let body = &self.bodies[body_ptr];
-        shape.refresh_transform(body);
-
-        let shape_idx;
-        if let Some(free_idx) = self.shapes_free_list.pop() {
-            shape_idx = free_idx;
-            self.shapes[shape_idx] = shape;
-        } else {
-            shape_idx = self.shapes.len();
-            self.shapes.push(shape);
-        }
-
-        self.shape_all_list.push(shape_idx);
-        self.bodies[body_ptr].shape_ptr = shape_idx;
-
-        match shape_type {
-            ShapeType::Circle(_) => self.circle_all_list.push(shape_idx),
-            ShapeType::Rect(_) => self.rect_all_list.push(shape_idx),
-            ShapeType::Polygon(_) => self.poly_all_list.push(shape_idx),
-        }
-
-        shape_idx
+        let body_idx = self.create_body(x, y, angle, density);
+        self.add_shape(
+            body_idx,
+            ShapeType::Polygon(Polygon::new_custom(vertices)),
+            Vec2::zero(),
+            0.0,
+        );
+        self.finalize_body(body_idx);
+        body_idx
     }
 
     pub fn step(&mut self) {
@@ -256,10 +311,14 @@ impl World {
         let candidate = self.bvh.query(&new_fat_aabb);
         for &shape_b_idx in &candidate {
             if shape_a_idx != shape_b_idx {
+                let body_a_ptr = self.shapes[shape_a_idx].body_ptr;
                 let body_b_ptr = self.shapes[shape_b_idx].body_ptr;
-                if inv_m > 0.0 || self.bodies[body_b_ptr].inv_m > 0.0 {
-                    let body_a_ptr = self.shapes[shape_a_idx].body_ptr;
-                    self.pair.get(body_a_ptr, body_b_ptr);
+
+                if body_a_ptr != body_b_ptr {
+                    if inv_m > 0.0 || self.bodies[body_b_ptr].inv_m > 0.0 {
+                        self.pair
+                            .get(shape_a_idx, shape_b_idx, body_a_ptr, body_b_ptr);
+                    }
                 }
             }
         }
@@ -274,8 +333,8 @@ impl World {
             let pool_idx = self.pair.active_pairs[i];
             let arbiter = &mut self.pair.pool[pool_idx].arbiter;
 
-            let shape_a_idx = self.bodies[arbiter.body_a_idx].shape_ptr;
-            let shape_b_idx = self.bodies[arbiter.body_b_idx].shape_ptr;
+            let shape_a_idx = arbiter.shape_a_idx;
+            let shape_b_idx = arbiter.shape_b_idx;
 
             let shape_a = &self.shapes[shape_a_idx];
             let shape_b = &self.shapes[shape_b_idx];

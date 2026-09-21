@@ -307,8 +307,8 @@ impl Renderer {
     fn draw_contact_points(&self, world: &World, camera: &Camera, color: Color, size: f32) {
         for &pool_idx in &world.pair_colliding_list {
             let arbiter = &world.pair.pool[pool_idx].arbiter;
-            let shape_a_idx = world.bodies[arbiter.body_a_idx].shape_ptr;
-            let shape_b_idx = world.bodies[arbiter.body_b_idx].shape_ptr;
+            let shape_a_idx = arbiter.shape_a_idx;
+            let shape_b_idx = arbiter.shape_b_idx;
 
             if self.visible_mask[shape_a_idx] || self.visible_mask[shape_b_idx] {
                 for i in 0..arbiter.manifold.point_count {
@@ -330,8 +330,9 @@ impl Renderer {
     ) {
         for &pool_idx in &world.pair_colliding_list {
             let arbiter = &world.pair.pool[pool_idx].arbiter;
-            let shape_a_idx = world.bodies[arbiter.body_a_idx].shape_ptr;
-            let shape_b_idx = world.bodies[arbiter.body_b_idx].shape_ptr;
+
+            let shape_a_idx = arbiter.shape_a_idx;
+            let shape_b_idx = arbiter.shape_b_idx;
 
             if self.visible_mask[shape_a_idx] || self.visible_mask[shape_b_idx] {
                 for i in 0..arbiter.manifold.point_count {
@@ -355,15 +356,10 @@ impl Renderer {
     }
 
     fn draw_centroids(&self, world: &World, camera: &Camera, color: Color, size: f32) {
-        for &shape_idx in &world.shape_all_list {
-            if self.visible_mask[shape_idx] {
-                let body_ptr = world.shapes[shape_idx].body_ptr;
-                let centroid = world.bodies[body_ptr].centroid;
-
-                let scr_pos = camera.transform_pos(&centroid);
-                // 畫一個小圓點代表物理質心
-                draw_circle(scr_pos.x as f32, scr_pos.y as f32, size, color);
-            }
+        for &body_idx in &world.bodies_active_list {
+            let body = &world.bodies[body_idx];
+            let scr_pos = camera.transform_pos(&body.centroid);
+            draw_circle(scr_pos.x as f32, scr_pos.y as f32, size, color);
         }
     }
 }
