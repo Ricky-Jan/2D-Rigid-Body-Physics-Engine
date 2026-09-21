@@ -34,7 +34,7 @@ impl World {
         let bias = omega / zeta;
         Self {
             context: PhysicsContext {
-                gravity: Vec2::new(0.0, -98.0),
+                gravity: Vec2::new(0.0, -50.0),
                 dt,
                 linear_drag: 0.997,
                 angular_drag: 0.997,
