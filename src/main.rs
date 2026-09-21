@@ -12,16 +12,29 @@ mod shape;
 mod world;
 
 use crate::{
+    math::Vec2,
     renderer::{Camera, Renderer},
     scene::TestScene,
 };
 use macroquad::prelude::*;
 
-#[macroquad::main("2D Rigid Body Physics Engine")]
+fn window_conf() -> Conf {
+    Conf {
+        window_title: "2D Rigid-Body Physics Engine".to_owned(),
+        window_width: 800,       // 適合錄製 GIF 的黃金寬度
+        window_height: 600,      // 適合錄製 GIF 的黃金高度
+        window_resizable: false, // 禁止玩家縮放視窗，確保每次錄影解析度一致
+        ..Default::default()
+    }
+}
+
+#[macroquad::main(window_conf)]
 async fn main() {
     let mut world = TestScene::create_world();
     let mut camera = Camera::new();
     let mut renderer = Renderer::new();
+
+    camera.pos = Vec2::new(-170.0, 100.0);
 
     let move_speed = 5.0;
 
