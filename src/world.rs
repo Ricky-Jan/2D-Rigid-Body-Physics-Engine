@@ -338,8 +338,12 @@ impl World {
             body.angle = (body.angle + body.ang_vel * self.context.dt) % TWO_PI;
             body.heading = Complex::new(body.angle.cos(), body.angle.sin());
 
-            let rotated_loc = body.heading.rotate(&body.loc_centroid);
-            body.pos = body.centroid.sub(&rotated_loc);
+            if body.is_regular {
+                body.pos = body.centroid;
+            } else {
+                let rotated_loc = body.heading.rotate(&body.loc_centroid);
+                body.pos = body.centroid.sub(&rotated_loc);
+            }
         }
     }
 }

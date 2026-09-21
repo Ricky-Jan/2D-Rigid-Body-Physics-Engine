@@ -181,6 +181,7 @@ impl Renderer {
     }
 
     fn debug_renderer(&self, world: &World, camera: &Camera) {
+        // self.draw_centroids(world, camera, Color::new(1.0, 1.0, 1.0, 1.0), 2.0);
         // self.draw_shape_aabbs(world, camera, Color::new(0.0, 1.0, 0.0, 1.0), 1.0);
         // self.draw_bvh_aabbs(world, camera, Color::new(1.0, 1.0, 1.0, 0.2), 1.0);
         // self.draw_penetrations(world, camera, Color::new(1.0, 1.0, 0.0, 1.0), 1.0, 4.0);
@@ -349,6 +350,19 @@ impl Renderer {
                         color,
                     );
                 }
+            }
+        }
+    }
+
+    fn draw_centroids(&self, world: &World, camera: &Camera, color: Color, size: f32) {
+        for &shape_idx in &world.shape_all_list {
+            if self.visible_mask[shape_idx] {
+                let body_ptr = world.shapes[shape_idx].body_ptr;
+                let centroid = world.bodies[body_ptr].centroid;
+
+                let scr_pos = camera.transform_pos(&centroid);
+                // 畫一個小圓點代表物理質心
+                draw_circle(scr_pos.x as f32, scr_pos.y as f32, size, color);
             }
         }
     }

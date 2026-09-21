@@ -18,6 +18,7 @@ pub struct RigidBody {
     pub shape_ptr: usize,
     pub restitution: f64,
     pub friction: f64,
+    pub is_regular: bool,
 }
 
 impl RigidBody {
@@ -36,21 +37,31 @@ impl RigidBody {
             shape_ptr: 0,
             restitution: DEFAULT_RESTITUTION,
             friction: DEFAULT_FRICTION,
+            is_regular: true,
         }
     }
 
     pub fn set_pos(&mut self, pos: Vec2) {
         self.pos = pos;
-        self.centroid = self.pos.add(&self.heading.rotate(&self.loc_centroid));
+        if self.is_regular {
+            self.centroid = self.pos;
+        } else {
+            self.centroid = self.pos.add(&self.heading.rotate(&self.loc_centroid));
+        }
     }
 
     pub fn set_angle(&mut self, angle: f64) {
         self.angle = angle % TWO_PI;
         self.heading = Complex::new(self.angle.cos(), self.angle.sin());
-        self.centroid = self.pos.add(&self.heading.rotate(&self.loc_centroid));
+        if self.is_regular {
+            self.centroid = self.pos;
+        } else {
+            self.centroid = self.pos.add(&self.heading.rotate(&self.loc_centroid));
+        }
     }
 
     pub fn calc_circle_properties(&mut self, radius: f64) {
+        self.is_regular = true;
         if self.density > 0.0 {
             let r_sq = radius * radius;
             let mass = PI * r_sq * self.density;
@@ -65,6 +76,7 @@ impl RigidBody {
     }
 
     pub fn calc_rect_properties(&mut self, width: f64, height: f64) {
+        self.is_regular = true;
         if self.density > 0.0 {
             let mass = width * height * self.density;
             let inertia = mass * (width * width + height * height) / 12.0;
@@ -80,6 +92,8 @@ impl RigidBody {
 
     pub fn calc_polygon_properties(&mut self, poly: &mut Polygon, density: f64, is_regular: bool) {
         self.density = density;
+        self.is_regular = is_regular;
+
         let count = poly.count;
         if count < 3 {
             return;
@@ -107,8 +121,9 @@ impl RigidBody {
             }
         }
 
-        if is_regular {
+        if self.is_regular {
             self.loc_centroid = Vec2::zero();
+            self.centroid = self.pos;
         } else {
             let mut cx = 0.0;
             let mut cy = 0.0;
@@ -124,9 +139,8 @@ impl RigidBody {
                 cy /= 6.0 * area;
             }
             self.loc_centroid = Vec2::new(cx, cy);
+            self.centroid = self.pos.add(&self.heading.rotate(&self.loc_centroid));
         }
-
-        self.centroid = self.pos.add(&self.heading.rotate(&self.loc_centroid));
 
         if density <= EPS {
             self.inv_m = 0.0;
