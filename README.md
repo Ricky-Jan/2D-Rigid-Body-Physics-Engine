@@ -33,9 +33,6 @@ This project is not a wrapper around existing libraries like Box2D. It is a comp
 ## 📊 Performance
 The engine is highly optimized for modern CPU architectures. Due to the strict DOD approach and minimal branching, the solver comfortably handles **1,000+ active rigid bodies** (mixing circles, rectangles, and arbitrary polygons) simultaneously at a rock-solid **60 FPS** on a single thread.
 
-<!-- 📸 Insert a stress-test screenshot or GIF here (e.g., a pyramid of 1000 boxes collapsing) -->
-> **[stress_test.gif placeholder]**
-
 ## 🗺️ Roadmap
 The core physics pipeline is feature-complete, but development is ongoing:
 - [ ] **Sleeping Islands:** Implement a graph-based sleep management system to entirely bypass integration and collision checks for resting bodies, vastly increasing the upper limit of total objects.
