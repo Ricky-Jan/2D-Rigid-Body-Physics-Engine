@@ -5,6 +5,7 @@ use crate::{
     shape::{MAX_POLY_VERTICES, ShapeType},
     world::World,
 };
+use macroquad::color::hsl_to_rgb;
 use macroquad::prelude::*;
 
 pub struct Camera {
@@ -91,21 +92,41 @@ impl Renderer {
     }
 
     fn render_world(&self, world: &World, camera: &Camera) {
-        let color = Color::new(1.0, 1.0, 1.0, 1.0);
         let thickness = 1.0;
+        let outline_color = Color::new(1.0, 1.0, 1.0, 1.0);
 
-        self.draw_circle_bodies(world, camera, color, thickness);
-        self.draw_rect_bodies(world, camera, color, thickness);
-        self.draw_poly_bodies(world, camera, color, thickness);
+        self.draw_circle_bodies(world, camera, thickness, outline_color);
+        self.draw_rect_bodies(world, camera, thickness, outline_color);
+        self.draw_poly_bodies(world, camera, thickness, outline_color);
     }
 
-    fn draw_circle_bodies(&self, world: &World, camera: &Camera, color: Color, thickness: f32) {
+    fn get_body_color(&self, world: &World, body_ptr: usize) -> Color {
+        let body = &world.bodies[body_ptr];
+        if body.inv_m == 0.0 {
+            return Color::new(0.3, 0.3, 0.3, 1.0);
+        } else if body.is_awake || body.island_id == 0 {
+            return Color::new(0.0, 0.0, 0.0, 0.0);
+        } else {
+            let hue = (body.island_id as f32 * 0.3819) % 1.0;
+            return hsl_to_rgb(hue, 0.7, 0.6);
+        }
+    }
+
+    fn draw_circle_bodies(
+        &self,
+        world: &World,
+        camera: &Camera,
+        thickness: f32,
+        outline_color: Color,
+    ) {
         for &shape_idx in &world.circle_all_list {
             if !self.visible_mask[shape_idx] {
                 continue;
             }
 
             let shape = &world.shapes[shape_idx];
+            let color = self.get_body_color(world, shape.body_ptr);
+
             if let ShapeType::Circle(circle) = shape.shape_type {
                 let scr_pos = camera.transform_pos(&shape.pos);
                 let scaled_radius = camera.transform_len(circle.radius);
@@ -116,53 +137,91 @@ impl Renderer {
                 let end_x = x + r * (shape.heading.re as f32);
                 let end_y = y - r * (shape.heading.im as f32);
 
-                draw_circle_lines(x, y, r, thickness, color);
-                draw_line(x, y, end_x, end_y, thickness, color);
+                draw_circle(x, y, r, color);
+                draw_circle_lines(x, y, r, thickness, outline_color);
+                draw_line(x, y, end_x, end_y, thickness, outline_color);
             }
         }
     }
 
-    fn draw_rect_bodies(&self, world: &World, camera: &Camera, color: Color, thickness: f32) {
+    fn draw_rect_bodies(
+        &self,
+        world: &World,
+        camera: &Camera,
+        thickness: f32,
+        outline_color: Color,
+    ) {
         for &shape_idx in &world.rect_all_list {
             if !self.visible_mask[shape_idx] {
                 continue;
             }
 
             let shape = &world.shapes[shape_idx];
+            let color = self.get_body_color(world, shape.body_ptr);
+
             if let ShapeType::Rect(rect) = shape.shape_type {
                 let mut scr_v = [Vec2::zero(); 4];
+                let mut points = [Vec2::zero(); 4];
 
                 for i in 0..4 {
                     scr_v[i] = camera.transform_pos(&rect.world_vertices[i]);
+                    points[i] = scr_v[i];
                 }
+
+                draw_triangle(
+                    vec2(scr_v[0].x as f32, scr_v[0].y as f32),
+                    vec2(scr_v[1].x as f32, scr_v[1].y as f32),
+                    vec2(scr_v[2].x as f32, scr_v[2].y as f32),
+                    color,
+                );
+                draw_triangle(
+                    vec2(scr_v[0].x as f32, scr_v[0].y as f32),
+                    vec2(scr_v[2].x as f32, scr_v[2].y as f32),
+                    vec2(scr_v[3].x as f32, scr_v[3].y as f32),
+                    color,
+                );
 
                 for i in 0..4 {
                     let next_i = (i + 1) % 4;
                     draw_line(
-                        scr_v[i].x as f32,
-                        scr_v[i].y as f32,
-                        scr_v[next_i].x as f32,
-                        scr_v[next_i].y as f32,
+                        points[i].x as f32,
+                        points[i].y as f32,
+                        points[next_i].x as f32,
+                        points[next_i].y as f32,
                         thickness,
-                        color,
+                        outline_color,
                     );
                 }
             }
         }
     }
 
-    fn draw_poly_bodies(&self, world: &World, camera: &Camera, color: Color, thickness: f32) {
+    fn draw_poly_bodies(
+        &self,
+        world: &World,
+        camera: &Camera,
+        thickness: f32,
+        outline_color: Color,
+    ) {
         for &shape_idx in &world.poly_all_list {
             if !self.visible_mask[shape_idx] {
                 continue;
             }
 
             let shape = &world.shapes[shape_idx];
+            let color = self.get_body_color(world, shape.body_ptr);
+
             if let ShapeType::Polygon(poly) = shape.shape_type {
                 let mut scr_v = [Vec2::zero(); MAX_POLY_VERTICES];
-
                 for i in 0..poly.count {
                     scr_v[i] = camera.transform_pos(&poly.world_vertices[i]);
+                }
+
+                let v0 = vec2(scr_v[0].x as f32, scr_v[0].y as f32);
+                for i in 1..poly.count - 1 {
+                    let v1 = vec2(scr_v[i].x as f32, scr_v[i].y as f32);
+                    let v2 = vec2(scr_v[i + 1].x as f32, scr_v[i + 1].y as f32);
+                    draw_triangle(v0, v1, v2, color);
                 }
 
                 for i in 0..poly.count {
@@ -173,7 +232,7 @@ impl Renderer {
                         scr_v[next_i].x as f32,
                         scr_v[next_i].y as f32,
                         thickness,
-                        color,
+                        outline_color,
                     );
                 }
             }
@@ -181,6 +240,7 @@ impl Renderer {
     }
 
     fn debug_renderer(&self, world: &World, camera: &Camera) {
+        // self.draw_islands(world, camera, Color::new(1.0, 1.0, 1.0, 1.0));
         // self.draw_centroids(world, camera, Color::new(1.0, 1.0, 1.0, 1.0), 2.0);
         // self.draw_shape_aabbs(world, camera, Color::new(0.0, 1.0, 0.0, 1.0), 1.0);
         // self.draw_bvh_aabbs(world, camera, Color::new(1.0, 1.0, 1.0, 0.2), 1.0);
@@ -360,6 +420,38 @@ impl Renderer {
             let body = &world.bodies[body_idx];
             let scr_pos = camera.transform_pos(&body.centroid);
             draw_circle(scr_pos.x as f32, scr_pos.y as f32, size, color);
+        }
+    }
+
+    fn draw_islands(&self, world: &World, camera: &Camera, color: Color) {
+        for &pool_idx in &world.pair.active_pairs {
+            let arbiter = &world.pair.pool[pool_idx].arbiter;
+            if arbiter.manifold.point_count > 0 {
+                let b_a = &world.bodies[arbiter.body_a_idx];
+                let b_b = &world.bodies[arbiter.body_b_idx];
+
+                if b_a.inv_m > 0.0 && b_b.inv_m > 0.0 {
+                    let p1 = camera.transform_pos(&b_a.centroid);
+                    let p2 = camera.transform_pos(&b_b.centroid);
+
+                    let line_color =
+                        if !b_a.is_awake && !b_b.is_awake && b_a.island_id == b_b.island_id {
+                            let hue = (b_a.island_id as f32 * 0.3819) % 1.0;
+                            hsl_to_rgb(hue, 1.0, 0.5)
+                        } else {
+                            color
+                        };
+
+                    draw_line(
+                        p1.x as f32,
+                        p1.y as f32,
+                        p2.x as f32,
+                        p2.y as f32,
+                        1.0,
+                        line_color,
+                    );
+                }
+            }
         }
     }
 }

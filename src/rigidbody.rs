@@ -19,6 +19,9 @@ pub struct RigidBody {
     pub restitution: f64,
     pub friction: f64,
     pub is_regular: bool,
+    pub is_awake: bool,
+    pub sleep_timer: f64,
+    pub island_id: usize,
 }
 
 impl RigidBody {
@@ -38,6 +41,9 @@ impl RigidBody {
             restitution: DEFAULT_RESTITUTION,
             friction: DEFAULT_FRICTION,
             is_regular: true,
+            is_awake: true,
+            sleep_timer: 0.0,
+            island_id: 0,
         }
     }
 
@@ -58,6 +64,11 @@ impl RigidBody {
         } else {
             self.centroid = self.pos.add(&self.heading.rotate(&self.loc_centroid));
         }
+    }
+
+    pub fn wake_up(&mut self) {
+        self.is_awake = true;
+        self.sleep_timer = 0.0;
     }
 
     pub fn apply_impulse(&mut self, impulse: &Vec2, arm: &Vec2) {

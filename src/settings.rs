@@ -5,3 +5,6 @@ pub const SOFTNESS_FREQUENCY: f64 = 15.0;
 pub const DEFAULT_FRICTION: f64 = 0.4;
 pub const DEFAULT_RESTITUTION: f64 = 0.2;
 pub const BALANCE: f64 = 5e-4;
+pub const SLEEP_LINEAR_VEL_SQ: f64 = 0.5;
+pub const SLEEP_ANGULAR_VEL_SQ: f64 = 0.5;
+pub const SLEEP_TIME: f64 = 0.5;
