@@ -387,7 +387,6 @@ impl World {
                     let body_a_idx = arbiter.body_a_idx;
                     let body_b_idx = arbiter.body_b_idx;
 
-                    // 碰撞喚醒
                     if awake_a && !awake_b && self.bodies[body_b_idx].inv_m > 0.0 {
                         self.bodies[body_b_idx].wake_up();
                     } else if awake_b && !awake_a && self.bodies[body_a_idx].inv_m > 0.0 {
