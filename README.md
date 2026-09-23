@@ -33,11 +33,6 @@ This project is not a wrapper around existing libraries like Box2D. It is a comp
 ## 📊 Performance
 The engine is highly optimized for modern CPU architectures. Due to the strict DOD approach and minimal branching, the solver comfortably handles **1,000+ active rigid bodies** (mixing circles, rectangles, and arbitrary polygons) simultaneously at a rock-solid **60 FPS** on a single thread.
 
-## 🗺️ Roadmap
-The core physics pipeline is feature-complete, but development is ongoing:
-- [ ] **Constraint Joints:** Introduce Distance, Revolute (Hinge), and Mouse joints via generalized Jacobian matrices and Baumgarte bias velocity formulation.
-- [ ] **Continuous Collision Detection (CCD):** Implement Time of Impact (TOI) calculations to prevent tunneling of high-velocity objects.
-
 ## 🛠️ Getting Started
 
 The core physics engine has **zero dependencies**. The included demo project utilizes [`macroquad`](https://github.com/not-fl3/macroquad) solely for visualization and debug rendering.
