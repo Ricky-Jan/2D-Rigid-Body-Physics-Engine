@@ -35,7 +35,6 @@ The engine is highly optimized for modern CPU architectures. Due to the strict D
 
 ## 🗺️ Roadmap
 The core physics pipeline is feature-complete, but development is ongoing:
-- [ ] **Sleeping Islands:** Implement a graph-based sleep management system to entirely bypass integration and collision checks for resting bodies, vastly increasing the upper limit of total objects.
 - [ ] **Constraint Joints:** Introduce Distance, Revolute (Hinge), and Mouse joints via generalized Jacobian matrices and Baumgarte bias velocity formulation.
 - [ ] **Continuous Collision Detection (CCD):** Implement Time of Impact (TOI) calculations to prevent tunneling of high-velocity objects.
 
