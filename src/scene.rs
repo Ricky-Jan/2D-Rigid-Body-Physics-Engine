@@ -25,6 +25,31 @@ impl TestScene {
         world.create_rect(-1400.0, 1500.0, 200.0, 3000.0, 0.0, 0.0);
         world.create_rect(1400.0, 1500.0, 200.0, 3000.0, 0.0, 0.0);
 
+        let b1 = world.create_rect(-200.0, 600.0, 60.0, 40.0, 0.0, 1.0);
+        let b2 = world.create_rect(0.0, 600.0, 60.0, 40.0, 0.0, 1.0);
+        let b3 = world.create_rect(200.0, 600.0, 60.0, 40.0, 0.0, 1.0);
+
+        world.create_distance_joint(
+            b1,
+            b2,
+            Vec2::new(30.0, 0.0),
+            Vec2::new(-30.0, 0.0),
+            80.0,
+            3.0,
+            0.5,
+        );
+
+        // 連接 b2 的右邊緣 與 b3 的左邊緣
+        world.create_distance_joint(
+            b2,
+            b3,
+            Vec2::new(30.0, 0.0),
+            Vec2::new(-30.0, 0.0),
+            80.0,
+            3.0,
+            0.5,
+        );
+
         let spawn_type = SpawnType::Random;
         let rows = 10;
         let cols = 15;

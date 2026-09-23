@@ -100,6 +100,7 @@ impl Renderer {
         self.draw_poly_bodies(world, camera, thickness, outline_color);
 
         self.draw_mouse_joints(world, camera, Color::new(0.0, 1.0, 1.0, 1.0));
+        self.draw_distance_joints(world, camera, Color::new(0.0, 1.0, 0.0, 1.0));
     }
 
     fn get_body_color(&self, world: &World, body_ptr: usize) -> Color {
@@ -249,6 +250,32 @@ impl Renderer {
 
             let p1 = camera.transform_pos(&anchor_world);
             let p2 = camera.transform_pos(&mj.target);
+
+            draw_line(
+                p1.x as f32,
+                p1.y as f32,
+                p2.x as f32,
+                p2.y as f32,
+                1.0,
+                color,
+            );
+        }
+    }
+
+    fn draw_distance_joints(&self, world: &World, camera: &Camera, color: Color) {
+        for dj in &world.distance_joints {
+            let body_a = &world.bodies[dj.body_a_idx];
+            let body_b = &world.bodies[dj.body_b_idx];
+
+            let anchor_a = body_a
+                .centroid
+                .add(&body_a.heading.rotate(&dj.local_anchor_a));
+            let anchor_b = body_b
+                .centroid
+                .add(&body_b.heading.rotate(&dj.local_anchor_b));
+
+            let p1 = camera.transform_pos(&anchor_a);
+            let p2 = camera.transform_pos(&anchor_b);
 
             draw_line(
                 p1.x as f32,

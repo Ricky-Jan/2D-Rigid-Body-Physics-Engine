@@ -2,7 +2,7 @@ use crate::{
     aabb::AABB,
     bvh::{DynamicBVH, NULL_PTR, TreeNode},
     collision::collide,
-    joint::MouseJoint,
+    joint::{DistanceJoint, MouseJoint},
     math::{Complex, EPS, TWO_PI, Vec2},
     pair::Pair,
     rigidbody::RigidBody,
@@ -33,6 +33,8 @@ pub struct World {
 
     pub bodies_to_destroy: Vec<usize>,
     pub mouse_joints_to_destroy: Vec<usize>,
+    pub distance_joints: Vec<DistanceJoint>,
+    pub distance_joints_to_destroy: Vec<usize>,
 }
 
 impl World {
@@ -76,6 +78,8 @@ impl World {
 
             bodies_to_destroy: Vec::new(),
             mouse_joints_to_destroy: Vec::new(),
+            distance_joints: Vec::new(),
+            distance_joints_to_destroy: Vec::new(),
         }
     }
 
@@ -284,9 +288,38 @@ impl World {
         body_idx
     }
 
+    pub fn create_distance_joint(
+        &mut self,
+        body_a_idx: usize,
+        body_b_idx: usize,
+        local_anchor_a: Vec2,
+        local_anchor_b: Vec2,
+        rest_length: f64,
+        frequency: f64,
+        damping: f64,
+    ) {
+        let dj = DistanceJoint::new(
+            body_a_idx,
+            body_b_idx,
+            local_anchor_a,
+            local_anchor_b,
+            rest_length,
+            frequency,
+            damping,
+            self.context.dt,
+        );
+        self.distance_joints.push(dj);
+    }
+
     pub fn destroy_mouse_joint(&mut self, joint_idx: usize) {
         if !self.mouse_joints_to_destroy.contains(&joint_idx) {
             self.mouse_joints_to_destroy.push(joint_idx);
+        }
+    }
+
+    pub fn destroy_distance_joint(&mut self, joint_idx: usize) {
+        if !self.distance_joints_to_destroy.contains(&joint_idx) {
+            self.distance_joints_to_destroy.push(joint_idx);
         }
     }
 
@@ -475,6 +508,15 @@ impl World {
             }
         }
 
+        for dj in &self.distance_joints {
+            let b_a = dj.body_a_idx;
+            let b_b = dj.body_b_idx;
+            if self.bodies[b_a].inv_m > 0.0 && self.bodies[b_b].inv_m > 0.0 {
+                self.island_adj[b_a].push(b_b);
+                self.island_adj[b_b].push(b_a);
+            }
+        }
+
         self.bodies_awake_list.clear();
 
         for i in 0..self.bodies_active_list.len() {
@@ -604,14 +646,55 @@ impl World {
 
     fn step_joints(&mut self) {
         for mj in &mut self.mouse_joints {
-            mj.init(&self.bodies[mj.body_idx]);
-            mj.warm_start(&mut self.bodies[mj.body_idx]);
+            if self.bodies[mj.body_idx].is_awake {
+                mj.init(&self.bodies[mj.body_idx]);
+                mj.warm_start(&mut self.bodies[mj.body_idx]);
+            }
+        }
+
+        for dj in &mut self.distance_joints {
+            let idx_a = dj.body_a_idx;
+            let idx_b = dj.body_b_idx;
+
+            if !self.bodies[idx_a].is_awake && !self.bodies[idx_b].is_awake {
+                continue;
+            }
+
+            let (body_a, body_b) = if idx_a < idx_b {
+                let (left, right) = self.bodies.split_at_mut(idx_b);
+                (&mut left[idx_a], &mut right[0])
+            } else {
+                let (left, right) = self.bodies.split_at_mut(idx_a);
+                (&mut right[0], &mut left[idx_b])
+            };
+            dj.init(body_a, body_b);
+            dj.warm_start(body_a, body_b);
         }
 
         for _ in 0..JOINT_ITER {
             for mj in &mut self.mouse_joints {
-                let body = &mut self.bodies[mj.body_idx];
-                mj.solve(body);
+                if self.bodies[mj.body_idx].is_awake {
+                    let body = &mut self.bodies[mj.body_idx];
+                    mj.solve(body);
+                }
+            }
+
+            for dj in &mut self.distance_joints {
+                let idx_a = dj.body_a_idx;
+                let idx_b = dj.body_b_idx;
+
+                if !self.bodies[idx_a].is_awake && !self.bodies[idx_b].is_awake {
+                    continue;
+                }
+
+                let (body_a, body_b) = if idx_a < idx_b {
+                    let (left, right) = self.bodies.split_at_mut(idx_b);
+                    (&mut left[idx_a], &mut right[0])
+                } else {
+                    let (left, right) = self.bodies.split_at_mut(idx_a);
+                    (&mut right[0], &mut left[idx_b])
+                };
+                dj.solve(body_a, body_b);
             }
         }
     }
@@ -623,6 +706,14 @@ impl World {
             for j in 0..self.mouse_joints.len() {
                 if self.mouse_joints[j].body_idx == body_idx {
                     self.destroy_mouse_joint(j);
+                }
+            }
+
+            for j in 0..self.distance_joints.len() {
+                if self.distance_joints[j].body_a_idx == body_idx
+                    || self.distance_joints[j].body_b_idx == body_idx
+                {
+                    self.destroy_distance_joint(j);
                 }
             }
 
@@ -697,6 +788,25 @@ impl World {
             }
         }
         self.mouse_joints_to_destroy.clear();
+
+        self.distance_joints_to_destroy
+            .sort_unstable_by(|a, b| b.cmp(a));
+        self.distance_joints_to_destroy.dedup();
+
+        for i in 0..self.distance_joints_to_destroy.len() {
+            let joint_idx = self.distance_joints_to_destroy[i];
+
+            if joint_idx < self.distance_joints.len() {
+                let body_a = self.distance_joints[joint_idx].body_a_idx;
+                let body_b = self.distance_joints[joint_idx].body_b_idx;
+
+                self.wake_up_body(body_a);
+                self.wake_up_body(body_b);
+
+                self.distance_joints.swap_remove(joint_idx);
+            }
+        }
+        self.distance_joints_to_destroy.clear();
     }
 }
 
