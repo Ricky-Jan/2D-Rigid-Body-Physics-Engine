@@ -8,6 +8,23 @@ use crate::{
 pub const MAX_POLY_VERTICES: usize = 8;
 
 #[derive(Clone, Copy)]
+pub struct Filter {
+    pub category_bits: u16,
+    pub mask_bits: u16,
+    pub group_index: i16,
+}
+
+impl Filter {
+    pub fn new() -> Self {
+        Self {
+            category_bits: 0x0001,
+            mask_bits: 0xFFFF,
+            group_index: 0,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
 pub struct BodyProperties {
     pub mass: f64,
     pub local_centroid: Vec2,
@@ -47,6 +64,8 @@ pub struct Shape {
     pub heading: Complex,
     pub aabb: AABB,
     pub fat_aabb: AABB,
+
+    pub filter: Filter,
 }
 
 impl Shape {
@@ -63,6 +82,7 @@ impl Shape {
             heading: Complex::new(1.0, 0.0),
             aabb: AABB::empty(),
             fat_aabb: AABB::empty(),
+            filter: Filter::new(),
         }
     }
 

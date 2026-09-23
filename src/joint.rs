@@ -100,8 +100,7 @@ pub struct DistanceJoint {
     pub local_anchor_b: Vec2,
     pub rest_length: f64,
 
-    // 解算器暫存變數
-    pub impulse: f64, // 1D 約束，脈衝為純量
+    pub impulse: f64,
     r_a: Vec2,
     r_b: Vec2,
     normal: Vec2,
@@ -216,5 +215,82 @@ impl DistanceJoint {
         let p = self.normal.scale(delta_impulse);
         body_a.apply_impulse(&p.reverse(), &self.r_a);
         body_b.apply_impulse(&p, &self.r_b);
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct RevoluteJoint {
+    pub body_a_idx: usize,
+    pub body_b_idx: usize,
+    pub local_anchor_a: Vec2,
+    pub local_anchor_b: Vec2,
+
+    pub impulse: Vec2,
+    r_a: Vec2,
+    r_b: Vec2,
+    inv_k: Mat22,
+    target_vel: Vec2,
+    bias: f64,
+}
+
+impl RevoluteJoint {
+    pub fn new(
+        body_a_idx: usize,
+        body_b_idx: usize,
+        local_anchor_a: Vec2,
+        local_anchor_b: Vec2,
+    ) -> Self {
+        Self {
+            body_a_idx,
+            body_b_idx,
+            local_anchor_a,
+            local_anchor_b,
+            impulse: Vec2::zero(),
+            r_a: Vec2::zero(),
+            r_b: Vec2::zero(),
+            inv_k: Mat22::zero(),
+            target_vel: Vec2::zero(),
+            bias: 0.2,
+        }
+    }
+
+    pub fn init(&mut self, body_a: &RigidBody, body_b: &RigidBody, dt: f64) {
+        self.r_a = body_a.heading.rotate(&self.local_anchor_a);
+        self.r_b = body_b.heading.rotate(&self.local_anchor_b);
+
+        let anchor_a = body_a.centroid.add(&self.r_a);
+        let anchor_b = body_b.centroid.add(&self.r_b);
+
+        self.target_vel = anchor_b.sub(&anchor_a).scale(self.bias / dt);
+
+        let k_a = Mat22::point_mass_matrix(body_a.inv_m, body_a.inv_i, &self.r_a);
+        let k_b = Mat22::point_mass_matrix(body_b.inv_m, body_b.inv_i, &self.r_b);
+        let k = k_a.add(&k_b);
+
+        self.inv_k = k.invert();
+    }
+
+    pub fn warm_start(&mut self, body_a: &mut RigidBody, body_b: &mut RigidBody) {
+        body_a.apply_impulse(&self.impulse.reverse(), &self.r_a);
+        body_b.apply_impulse(&self.impulse, &self.r_b);
+    }
+
+    pub fn solve(&mut self, body_a: &mut RigidBody, body_b: &mut RigidBody) {
+        let w_cross_r_a = Vec2::cross_sv(body_a.ang_vel, &self.r_a);
+        let v_a = body_a.vel.add(&w_cross_r_a);
+
+        let w_cross_r_b = Vec2::cross_sv(body_b.ang_vel, &self.r_b);
+        let v_b = body_b.vel.add(&w_cross_r_b);
+
+        let cdot = v_b.sub(&v_a).add(&self.target_vel);
+
+        let impulse_diff = self.inv_k.mul_v(&cdot);
+
+        let new_impulse = self.impulse.sub(&impulse_diff);
+        let delta_impulse = new_impulse.sub(&self.impulse);
+        self.impulse = new_impulse;
+
+        body_a.apply_impulse(&delta_impulse.reverse(), &self.r_a);
+        body_b.apply_impulse(&delta_impulse, &self.r_b);
     }
 }

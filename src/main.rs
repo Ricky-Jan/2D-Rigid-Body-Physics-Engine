@@ -17,7 +17,7 @@ use crate::{
     joint::MouseJoint,
     math::{PI, Vec2},
     renderer::{Camera, Renderer},
-    scene::{SpawnType, TestScene},
+    scene::TestScene,
     shape::{Circle, Rect, ShapeType},
 };
 use macroquad::prelude::*;

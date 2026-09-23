@@ -110,6 +110,15 @@ impl Mat22 {
         Self::new(0.0, 0.0, 0.0, 0.0)
     }
 
+    pub fn add(&self, b: &Self) -> Self {
+        Self::new(
+            self.m11 + b.m11,
+            self.m12 + b.m12,
+            self.m21 + b.m21,
+            self.m22 + b.m22,
+        )
+    }
+
     pub fn mul_v(&self, v: &Vec2) -> Vec2 {
         Vec2::new(
             self.m11 * v.x + self.m12 * v.y,

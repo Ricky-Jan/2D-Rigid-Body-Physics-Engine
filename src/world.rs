@@ -2,7 +2,7 @@ use crate::{
     aabb::AABB,
     bvh::{DynamicBVH, NULL_PTR, TreeNode},
     collision::collide,
-    joint::{DistanceJoint, MouseJoint},
+    joint::{DistanceJoint, MouseJoint, RevoluteJoint},
     math::{Complex, EPS, TWO_PI, Vec2},
     pair::Pair,
     rigidbody::RigidBody,
@@ -35,6 +35,8 @@ pub struct World {
     pub mouse_joints_to_destroy: Vec<usize>,
     pub distance_joints: Vec<DistanceJoint>,
     pub distance_joints_to_destroy: Vec<usize>,
+    pub revolute_joints: Vec<RevoluteJoint>,
+    pub revolute_joints_to_destroy: Vec<usize>,
 }
 
 impl World {
@@ -80,6 +82,8 @@ impl World {
             mouse_joints_to_destroy: Vec::new(),
             distance_joints: Vec::new(),
             distance_joints_to_destroy: Vec::new(),
+            revolute_joints: Vec::new(),
+            revolute_joints_to_destroy: Vec::new(),
         }
     }
 
@@ -288,6 +292,12 @@ impl World {
         body_idx
     }
 
+    pub fn destroy_mouse_joint(&mut self, joint_idx: usize) {
+        if !self.mouse_joints_to_destroy.contains(&joint_idx) {
+            self.mouse_joints_to_destroy.push(joint_idx);
+        }
+    }
+
     pub fn create_distance_joint(
         &mut self,
         body_a_idx: usize,
@@ -311,21 +321,42 @@ impl World {
         self.distance_joints.push(dj);
     }
 
-    pub fn destroy_mouse_joint(&mut self, joint_idx: usize) {
-        if !self.mouse_joints_to_destroy.contains(&joint_idx) {
-            self.mouse_joints_to_destroy.push(joint_idx);
-        }
-    }
-
     pub fn destroy_distance_joint(&mut self, joint_idx: usize) {
         if !self.distance_joints_to_destroy.contains(&joint_idx) {
             self.distance_joints_to_destroy.push(joint_idx);
         }
     }
 
+    pub fn create_revolute_joint(
+        &mut self,
+        body_a_idx: usize,
+        body_b_idx: usize,
+        local_anchor_a: Vec2,
+        local_anchor_b: Vec2,
+    ) {
+        let rj = RevoluteJoint::new(body_a_idx, body_b_idx, local_anchor_a, local_anchor_b);
+        self.revolute_joints.push(rj);
+    }
+
+    pub fn destroy_revolute_joint(&mut self, joint_idx: usize) {
+        if !self.revolute_joints_to_destroy.contains(&joint_idx) {
+            self.revolute_joints_to_destroy.push(joint_idx);
+        }
+    }
+
     pub fn destroy_rigid(&mut self, body_idx: usize) {
         if !self.bodies_to_destroy.contains(&body_idx) {
             self.bodies_to_destroy.push(body_idx);
+        }
+    }
+
+    pub fn set_body_filter(&mut self, body_idx: usize, category: u16, mask: u16, group: i16) {
+        let mut curr = self.bodies[body_idx].shape_head;
+        while curr != NULL_PTR {
+            self.shapes[curr].filter.category_bits = category;
+            self.shapes[curr].filter.mask_bits = mask;
+            self.shapes[curr].filter.group_index = group;
+            curr = self.shapes[curr].next;
         }
     }
 
@@ -414,9 +445,24 @@ impl World {
                 let body_b_ptr = self.shapes[shape_b_idx].body_ptr;
 
                 if body_a_ptr != body_b_ptr {
-                    if inv_m > 0.0 || self.bodies[body_b_ptr].inv_m > 0.0 {
-                        self.pair
-                            .get(shape_a_idx, shape_b_idx, body_a_ptr, body_b_ptr);
+                    let filter_a = &self.shapes[shape_a_idx].filter;
+                    let filter_b = &self.shapes[shape_b_idx].filter;
+
+                    let can_collide = if filter_a.group_index == filter_b.group_index
+                        && filter_a.group_index != 0
+                    {
+                        filter_a.group_index > 0
+                    } else {
+                        let match_a = (filter_a.mask_bits & filter_b.category_bits) != 0;
+                        let match_b = (filter_b.mask_bits & filter_a.category_bits) != 0;
+                        match_a && match_b
+                    };
+
+                    if can_collide {
+                        if inv_m > 0.0 || self.bodies[body_b_ptr].inv_m > 0.0 {
+                            self.pair
+                                .get(shape_a_idx, shape_b_idx, body_a_ptr, body_b_ptr);
+                        }
                     }
                 }
             }
@@ -444,9 +490,21 @@ impl World {
 
             let shape_a = &self.shapes[shape_a_idx];
             let shape_b = &self.shapes[shape_b_idx];
+
+            let filter_a = &shape_a.filter;
+            let filter_b = &shape_b.filter;
+            let can_collide =
+                if filter_a.group_index == filter_b.group_index && filter_a.group_index != 0 {
+                    filter_a.group_index > 0
+                } else {
+                    let match_a = (filter_a.mask_bits & filter_b.category_bits) != 0;
+                    let match_b = (filter_b.mask_bits & filter_a.category_bits) != 0;
+                    match_a && match_b
+                };
+
             let mut is_colliding = false;
 
-            if shape_a.aabb.intersect(&shape_b.aabb) {
+            if can_collide && shape_a.aabb.intersect(&shape_b.aabb) {
                 is_colliding = collide(&mut arbiter.manifold, shape_a, shape_b, &mut arbiter.cache);
 
                 if is_colliding {
@@ -474,7 +532,7 @@ impl World {
 
             if !is_colliding {
                 arbiter.manifold.point_count = 0;
-                if !shape_a.fat_aabb.intersect(&shape_b.fat_aabb) {
+                if !can_collide || !shape_a.fat_aabb.intersect(&shape_b.fat_aabb) {
                     self.pair.remove(pool_idx);
                 }
             }
@@ -511,6 +569,15 @@ impl World {
         for dj in &self.distance_joints {
             let b_a = dj.body_a_idx;
             let b_b = dj.body_b_idx;
+            if self.bodies[b_a].inv_m > 0.0 && self.bodies[b_b].inv_m > 0.0 {
+                self.island_adj[b_a].push(b_b);
+                self.island_adj[b_b].push(b_a);
+            }
+        }
+
+        for rj in &self.revolute_joints {
+            let b_a = rj.body_a_idx;
+            let b_b = rj.body_b_idx;
             if self.bodies[b_a].inv_m > 0.0 && self.bodies[b_b].inv_m > 0.0 {
                 self.island_adj[b_a].push(b_b);
                 self.island_adj[b_b].push(b_a);
@@ -671,6 +738,26 @@ impl World {
             dj.warm_start(body_a, body_b);
         }
 
+        for rj in &mut self.revolute_joints {
+            let idx_a = rj.body_a_idx;
+            let idx_b = rj.body_b_idx;
+
+            if !self.bodies[idx_a].is_awake && !self.bodies[idx_b].is_awake {
+                continue;
+            }
+
+            let (body_a, body_b) = if idx_a < idx_b {
+                let (left, right) = self.bodies.split_at_mut(idx_b);
+                (&mut left[idx_a], &mut right[0])
+            } else {
+                let (left, right) = self.bodies.split_at_mut(idx_a);
+                (&mut right[0], &mut left[idx_b])
+            };
+
+            rj.init(body_a, body_b, self.context.dt);
+            rj.warm_start(body_a, body_b);
+        }
+
         for _ in 0..JOINT_ITER {
             for mj in &mut self.mouse_joints {
                 if self.bodies[mj.body_idx].is_awake {
@@ -696,6 +783,24 @@ impl World {
                 };
                 dj.solve(body_a, body_b);
             }
+
+            for rj in &mut self.revolute_joints {
+                let idx_a = rj.body_a_idx;
+                let idx_b = rj.body_b_idx;
+
+                if !self.bodies[idx_a].is_awake && !self.bodies[idx_b].is_awake {
+                    continue;
+                }
+
+                let (body_a, body_b) = if idx_a < idx_b {
+                    let (left, right) = self.bodies.split_at_mut(idx_b);
+                    (&mut left[idx_a], &mut right[0])
+                } else {
+                    let (left, right) = self.bodies.split_at_mut(idx_a);
+                    (&mut right[0], &mut left[idx_b])
+                };
+                rj.solve(body_a, body_b);
+            }
         }
     }
 
@@ -714,6 +819,14 @@ impl World {
                     || self.distance_joints[j].body_b_idx == body_idx
                 {
                     self.destroy_distance_joint(j);
+                }
+            }
+
+            for j in 0..self.revolute_joints.len() {
+                if self.revolute_joints[j].body_a_idx == body_idx
+                    || self.revolute_joints[j].body_b_idx == body_idx
+                {
+                    self.destroy_revolute_joint(j);
                 }
             }
 
@@ -807,6 +920,25 @@ impl World {
             }
         }
         self.distance_joints_to_destroy.clear();
+
+        self.revolute_joints_to_destroy
+            .sort_unstable_by(|a, b| b.cmp(a));
+        self.revolute_joints_to_destroy.dedup();
+
+        for i in 0..self.revolute_joints_to_destroy.len() {
+            let joint_idx = self.revolute_joints_to_destroy[i];
+
+            if joint_idx < self.revolute_joints.len() {
+                let body_a = self.revolute_joints[joint_idx].body_a_idx;
+                let body_b = self.revolute_joints[joint_idx].body_b_idx;
+
+                self.wake_up_body(body_a);
+                self.wake_up_body(body_b);
+
+                self.revolute_joints.swap_remove(joint_idx);
+            }
+        }
+        self.revolute_joints_to_destroy.clear();
     }
 }
 

@@ -1,19 +1,10 @@
 use crate::{
+    bvh::NULL_PTR,
     math::{PI, Vec2},
     shape::{Circle, Polygon, Rect, ShapeType},
     world::World,
 };
 use macroquad::rand::{gen_range, rand};
-
-#[derive(Clone, Copy, PartialEq)]
-pub enum SpawnType {
-    Circle = 0,
-    Rect = 1,
-    RegularPoly = 2,
-    CustomPoly = 3,
-    Compound = 4,
-    Random = 5,
-}
 
 pub struct TestScene;
 
@@ -21,112 +12,179 @@ impl TestScene {
     pub fn create_world() -> World {
         let mut world = World::new();
 
-        world.create_rect(0.0, -100.0, 3000.0, 200.0, 0.0, 0.0);
-        world.create_rect(-1400.0, 1500.0, 200.0, 3000.0, 0.0, 0.0);
-        world.create_rect(1400.0, 1500.0, 200.0, 3000.0, 0.0, 0.0);
+        let mut set_filter =
+            |world: &mut World, body_idx: usize, cat: u16, mask: u16, group: i16| {
+                let mut curr = world.bodies[body_idx].shape_head;
+                while curr != NULL_PTR {
+                    world.shapes[curr].filter.category_bits = cat;
+                    world.shapes[curr].filter.mask_bits = mask;
+                    world.shapes[curr].filter.group_index = group;
+                    curr = world.shapes[curr].next;
+                }
+            };
 
-        let b1 = world.create_rect(-200.0, 600.0, 60.0, 40.0, 0.0, 1.0);
-        let b2 = world.create_rect(0.0, 600.0, 60.0, 40.0, 0.0, 1.0);
-        let b3 = world.create_rect(200.0, 600.0, 60.0, 40.0, 0.0, 1.0);
+        // ==========================================
+        // 0. Scene Boundaries (Static Walls)
+        // ==========================================
+        world.create_rect(0.0, -100.0, 4000.0, 200.0, 0.0, 0.0);
+        world.create_rect(-2100.0, 900.0, 200.0, 2200.0, 0.0, 0.0);
+        world.create_rect(2100.0, 900.0, 200.0, 2200.0, 0.0, 0.0);
 
-        world.create_distance_joint(
-            b1,
-            b2,
-            Vec2::new(30.0, 0.0),
-            Vec2::new(-30.0, 0.0),
-            80.0,
-            3.0,
-            0.5,
+        // ==========================================
+        // 1. Distance Joint + Inset Anchor
+        // ==========================================
+        let plank_w = 40.0;
+        let plank_h = 12.0;
+
+        let indent = plank_h / 2.0;
+        let anchor_x = plank_w / 2.0 - indent;
+        let rest_len = indent * 2.0;
+
+        let bridge_start_x = -700.0;
+        let bridge_y = 1100.0;
+        let plank_count = 35;
+
+        let pillar_l = world.create_rect(bridge_start_x - 40.0, bridge_y, 40.0, 40.0, 0.0, 0.0);
+        let pillar_r = world.create_rect(
+            bridge_start_x + (plank_count as f64) * plank_w,
+            bridge_y,
+            40.0,
+            40.0,
+            0.0,
+            0.0,
         );
 
-        // 連接 b2 的右邊緣 與 b3 的左邊緣
+        let mut prev_body = pillar_l;
+        let mut prev_anchor = Vec2::new(20.0, 0.0);
+
+        for i in 0..plank_count {
+            let x = bridge_start_x + (i as f64) * plank_w + (plank_w / 2.0);
+            let plank = world.create_rect(x, bridge_y, plank_w, plank_h, 0.0, 1.5);
+
+            set_filter(&mut world, plank, 1, 0xFFFF, -1);
+
+            world.create_distance_joint(
+                prev_body,
+                plank,
+                prev_anchor,
+                Vec2::new(-anchor_x, 0.0),
+                if i == 0 { indent } else { rest_len },
+                10.0,
+                10.0,
+            );
+            prev_body = plank;
+            prev_anchor = Vec2::new(anchor_x, 0.0);
+        }
+
         world.create_distance_joint(
-            b2,
-            b3,
-            Vec2::new(30.0, 0.0),
-            Vec2::new(-30.0, 0.0),
-            80.0,
-            3.0,
-            0.5,
+            prev_body,
+            pillar_r,
+            prev_anchor,
+            Vec2::new(-20.0, 0.0),
+            indent,
+            15.0,
+            1.0,
         );
 
-        let spawn_type = SpawnType::Random;
-        let rows = 10;
-        let cols = 15;
-        let spacing_x = 100.0;
-        let spacing_y = 100.0;
+        // ==========================================
+        // 2. Ragdoll - self collision ON
+        // ==========================================
+        let rag_x = 0.0;
+        let rag_y = 1600.0;
 
-        let start_x = -((cols as f64 - 1.0) * spacing_x) / 2.0;
-        let start_y = 100.0;
+        let head = world.create_circle(rag_x, rag_y + 70.0, 15.0, 0.0, 1.0);
+        let torso = world.create_rect(rag_x, rag_y + 15.0, 30.0, 60.0, 0.0, 1.5);
+        let arm_l = world.create_rect(rag_x - 35.0, rag_y + 30.0, 40.0, 15.0, 0.0, 0.8);
+        let arm_r = world.create_rect(rag_x + 35.0, rag_y + 30.0, 40.0, 15.0, 0.0, 0.8);
+        let leg_l = world.create_rect(rag_x - 10.0, rag_y - 40.0, 15.0, 50.0, 0.0, 1.0);
+        let leg_r = world.create_rect(rag_x + 10.0, rag_y - 40.0, 15.0, 50.0, 0.0, 1.0);
 
-        for row in 0..rows {
+        world.create_revolute_joint(head, torso, Vec2::new(0.0, -15.0), Vec2::new(0.0, 30.0));
+        world.create_revolute_joint(torso, arm_l, Vec2::new(-15.0, 15.0), Vec2::new(20.0, 0.0));
+        world.create_revolute_joint(torso, arm_r, Vec2::new(15.0, 15.0), Vec2::new(-20.0, 0.0));
+        world.create_revolute_joint(torso, leg_l, Vec2::new(-10.0, -30.0), Vec2::new(0.0, 25.0));
+        world.create_revolute_joint(torso, leg_r, Vec2::new(10.0, -30.0), Vec2::new(0.0, 25.0));
+
+        // ==========================================
+        // 3. Box Pyramid
+        // ==========================================
+        let base_count = 15;
+        let box_size = 40.0;
+        let start_x = 1000.0;
+        for row in 0..base_count {
+            let y = 50.0 + (row as f64) * box_size;
+            let cols = base_count - row;
             for col in 0..cols {
-                let jitter_x = gen_range(-2.0, 2.0);
-                let x = start_x + (col as f64) * spacing_x + jitter_x;
-                let y = start_y + (row as f64) * spacing_y;
+                let x = start_x + (col as f64) * box_size - (cols as f64 * box_size) / 2.0;
+                world.create_rect(x, y, box_size - 2.0, box_size - 2.0, 0.0, 1.0);
+            }
+        }
 
-                let angle = gen_range(-0.05, 0.05);
-                let density = gen_range(0.5, 2.0);
+        // ==========================================
+        // 4. Static Giant Shapes (Circle, Triangle, Concave Funnel)
+        // ==========================================
+        world.create_circle(-1500.0, 500.0, 80.0, 0.0, 0.0);
 
-                let choice = if spawn_type == SpawnType::Random {
-                    rand() % 5
-                } else {
-                    spawn_type as u32
-                };
+        world.create_regular_polygon(-1000.0, 400.0, 3, 100.0, PI / 6.0, 0.0);
 
-                match choice {
+        world.create_rect(-1300.0, 250.0, 20.0, 150.0, PI / 6.0, 0.0);
+        world.create_rect(-1100.0, 250.0, 20.0, 150.0, -PI / 6.0, 0.0);
+        world.create_rect(-1200.0, 150.0, 150.0, 20.0, 0.0, 0.0);
+
+        // ==========================================
+        // 5. Dynamic Debris & Compound
+        // ==========================================
+        let car_body = world.create_body(-1500.0, 1400.0, -0.2, 2.0);
+        world.add_shape(
+            car_body,
+            ShapeType::Rect(Rect::new(80.0, 30.0)),
+            Vec2::zero(),
+            0.0,
+        );
+        world.add_shape(
+            car_body,
+            ShapeType::Circle(Circle::new(20.0)),
+            Vec2::new(-35.0, -15.0),
+            0.0,
+        );
+        world.add_shape(
+            car_body,
+            ShapeType::Circle(Circle::new(20.0)),
+            Vec2::new(35.0, -15.0),
+            0.0,
+        );
+        world.finalize_body(car_body);
+
+        // Randomly generate some debris shapes
+        for i in 0..6 {
+            for j in 0..5 {
+                let x = -1600.0 + (j as f64) * 100.0 + gen_range(-10.0, 10.0);
+                let y = 800.0 + (i as f64) * 80.0;
+                let angle = gen_range(0.0, PI);
+
+                match rand() % 3 {
                     0 => {
-                        let radius = gen_range(15.0, 25.0);
-                        world.create_circle(x, y, radius, angle, density);
+                        world.create_circle(x, y, gen_range(15.0, 25.0), angle, 1.0);
                     }
                     1 => {
-                        let width = gen_range(30.0, 60.0);
-                        let height = gen_range(30.0, 60.0);
-                        world.create_rect(x, y, width, height, angle, density);
-                    }
-                    2 => {
-                        let sides = gen_range(3, 8) as usize;
-                        let radius = gen_range(20.0, 30.0);
-                        world.create_regular_polygon(x, y, sides, radius, angle, density);
-                    }
-                    3 => {
-                        let top_w = gen_range(15.0, 30.0);
-                        let bot_w = gen_range(30.0, 50.0);
-                        let h = gen_range(30.0, 50.0);
-
-                        let vertices = [
-                            Vec2::new(0.0, h),
-                            Vec2::new(top_w, h),
-                            Vec2::new(bot_w, 0.0),
-                            Vec2::new(-bot_w * 0.5, 0.0),
-                        ];
-                        world.create_custom_polygon(x, y, &vertices, angle, density);
+                        world.create_rect(
+                            x,
+                            y,
+                            gen_range(30.0, 50.0),
+                            gen_range(30.0, 50.0),
+                            angle,
+                            1.0,
+                        );
                     }
                     _ => {
-                        let car_body = world.create_body(x, y, angle, density);
-
-                        world.add_shape(
-                            car_body,
-                            ShapeType::Rect(Rect::new(80.0, 30.0)),
-                            Vec2::zero(),
-                            0.0,
+                        world.create_regular_polygon(
+                            x,
+                            y,
+                            gen_range(4, 7) as usize,
+                            gen_range(20.0, 30.0),
+                            angle,
+                            1.0,
                         );
-
-                        world.add_shape(
-                            car_body,
-                            ShapeType::Circle(Circle::new(15.0)),
-                            Vec2::new(-30.0, -15.0),
-                            0.0,
-                        );
-
-                        world.add_shape(
-                            car_body,
-                            ShapeType::Circle(Circle::new(15.0)),
-                            Vec2::new(30.0, -15.0),
-                            0.0,
-                        );
-
-                        world.finalize_body(car_body);
                     }
                 }
             }

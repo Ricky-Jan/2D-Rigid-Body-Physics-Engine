@@ -101,6 +101,7 @@ impl Renderer {
 
         self.draw_mouse_joints(world, camera, Color::new(0.0, 1.0, 1.0, 1.0));
         self.draw_distance_joints(world, camera, Color::new(0.0, 1.0, 0.0, 1.0));
+        self.draw_revolute_joints(world, camera, Color::new(1.0, 1.0, 0.0, 1.0));
     }
 
     fn get_body_color(&self, world: &World, body_ptr: usize) -> Color {
@@ -285,6 +286,18 @@ impl Renderer {
                 1.0,
                 color,
             );
+        }
+    }
+
+    fn draw_revolute_joints(&self, world: &World, camera: &Camera, color: Color) {
+        for rj in &world.revolute_joints {
+            let body_a = &world.bodies[rj.body_a_idx];
+            let anchor = body_a
+                .centroid
+                .add(&body_a.heading.rotate(&rj.local_anchor_a));
+            let p = camera.transform_pos(&anchor);
+
+            draw_circle(p.x as f32, p.y as f32, 2.0, color);
         }
     }
 
