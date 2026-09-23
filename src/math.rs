@@ -56,6 +56,16 @@ impl Vec2 {
     pub fn normal(&self) -> Self {
         Self::new(self.y, -self.x)
     }
+
+    pub fn clamp_mag(&self, max_len: f64) -> Self {
+        let len_sq = self.dist_sq();
+        if len_sq > max_len * max_len && max_len > 0.0 {
+            let len = len_sq.sqrt();
+            self.scale(max_len / len)
+        } else {
+            *self
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -80,5 +90,52 @@ impl Complex {
             v.x * self.re + v.y * self.im,
             -v.x * self.im + v.y * self.re,
         )
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Mat22 {
+    pub m11: f64,
+    pub m12: f64,
+    pub m21: f64,
+    pub m22: f64,
+}
+
+impl Mat22 {
+    pub fn new(m11: f64, m12: f64, m21: f64, m22: f64) -> Self {
+        Self { m11, m12, m21, m22 }
+    }
+
+    pub fn zero() -> Self {
+        Self::new(0.0, 0.0, 0.0, 0.0)
+    }
+
+    pub fn mul_v(&self, v: &Vec2) -> Vec2 {
+        Vec2::new(
+            self.m11 * v.x + self.m12 * v.y,
+            self.m21 * v.x + self.m22 * v.y,
+        )
+    }
+
+    pub fn invert(&self) -> Self {
+        let det = self.m11 * self.m22 - self.m12 * self.m21;
+        if det != 0.0 {
+            let inv_det = 1.0 / det;
+            Self::new(
+                self.m22 * inv_det,
+                -self.m12 * inv_det,
+                -self.m21 * inv_det,
+                self.m11 * inv_det,
+            )
+        } else {
+            Self::zero()
+        }
+    }
+
+    pub fn point_mass_matrix(inv_m: f64, inv_i: f64, r: &Vec2) -> Self {
+        let k11 = inv_m + r.y * r.y * inv_i;
+        let k22 = inv_m + r.x * r.x * inv_i;
+        let k12 = -r.x * r.y * inv_i;
+        Self::new(k11, k12, k12, k22)
     }
 }

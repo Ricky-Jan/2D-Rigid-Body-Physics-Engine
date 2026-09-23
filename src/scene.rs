@@ -25,9 +25,9 @@ impl TestScene {
         world.create_rect(-1400.0, 1500.0, 200.0, 3000.0, 0.0, 0.0);
         world.create_rect(1400.0, 1500.0, 200.0, 3000.0, 0.0, 0.0);
 
-        let spawn_type = SpawnType::Circle;
-        let rows = 40;
-        let cols = 25;
+        let spawn_type = SpawnType::Random;
+        let rows = 10;
+        let cols = 15;
         let spacing_x = 100.0;
         let spacing_y = 100.0;
 

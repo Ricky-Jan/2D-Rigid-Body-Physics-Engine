@@ -98,6 +98,8 @@ impl Renderer {
         self.draw_circle_bodies(world, camera, thickness, outline_color);
         self.draw_rect_bodies(world, camera, thickness, outline_color);
         self.draw_poly_bodies(world, camera, thickness, outline_color);
+
+        self.draw_mouse_joints(world, camera, Color::new(0.0, 1.0, 1.0, 1.0));
     }
 
     fn get_body_color(&self, world: &World, body_ptr: usize) -> Color {
@@ -239,21 +241,41 @@ impl Renderer {
         }
     }
 
+    fn draw_mouse_joints(&self, world: &World, camera: &Camera, color: Color) {
+        for mj in &world.mouse_joints {
+            let body = &world.bodies[mj.body_idx];
+
+            let anchor_world = body.centroid.add(&body.heading.rotate(&mj.local_anchor));
+
+            let p1 = camera.transform_pos(&anchor_world);
+            let p2 = camera.transform_pos(&mj.target);
+
+            draw_line(
+                p1.x as f32,
+                p1.y as f32,
+                p2.x as f32,
+                p2.y as f32,
+                1.0,
+                color,
+            );
+        }
+    }
+
     fn debug_renderer(&self, world: &World, camera: &Camera) {
-        // self.draw_islands(world, camera, Color::new(1.0, 1.0, 1.0, 1.0));
-        // self.draw_centroids(world, camera, Color::new(1.0, 1.0, 1.0, 1.0), 2.0);
+        self.draw_islands(world, camera, Color::new(1.0, 1.0, 0.0, 1.0));
+        self.draw_centroids(world, camera, Color::new(1.0, 1.0, 1.0, 1.0), 2.0);
         // self.draw_shape_aabbs(world, camera, Color::new(0.0, 1.0, 0.0, 1.0), 1.0);
         // self.draw_bvh_aabbs(world, camera, Color::new(1.0, 1.0, 1.0, 0.2), 1.0);
-        // self.draw_penetrations(world, camera, Color::new(1.0, 1.0, 0.0, 1.0), 1.0, 4.0);
-        // self.draw_contact_points(world, camera, Color::new(0.0, 1.0, 1.0, 1.0), 2.0);
+        self.draw_penetrations(world, camera, Color::new(1.0, 1.0, 0.0, 1.0), 1.0, 4.0);
+        self.draw_contact_points(world, camera, Color::new(0.0, 1.0, 1.0, 1.0), 2.0);
 
-        // self.draw_bvh_branches(
-        //     world,
-        //     100.0,
-        //     100.0,
-        //     Color::new(1.0, 1.0, 1.0, 1.0),
-        //     Color::new(1.0, 0.0, 0.0, 1.0),
-        // );
+        self.draw_bvh_branches(
+            world,
+            100.0,
+            100.0,
+            Color::new(1.0, 1.0, 1.0, 1.0),
+            Color::new(1.0, 0.0, 0.0, 1.0),
+        );
     }
 
     fn draw_aabb(&self, aabb: &AABB, camera: &Camera, color: Color, thickness: f32) {

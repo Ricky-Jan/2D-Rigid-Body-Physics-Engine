@@ -210,6 +210,30 @@ impl Shape {
             }
         }
     }
+
+    pub fn contains_point(&self, point: &Vec2) -> bool {
+        match &self.shape_type {
+            ShapeType::Circle(circle) => {
+                let delta = point.sub(&self.pos);
+                delta.dist_sq() <= circle.radius * circle.radius
+            }
+            ShapeType::Rect(rect) => {
+                let delta = point.sub(&self.pos);
+                let local_p = self.heading.inv_rotate(&delta);
+                local_p.x.abs() <= rect.hw && local_p.y.abs() <= rect.hh
+            }
+            ShapeType::Polygon(poly) => {
+                for i in 0..poly.count {
+                    let v = poly.world_vertices[i];
+                    let n = poly.world_normals[i];
+                    if point.sub(&v).dot(&n) > 0.0 {
+                        return false;
+                    }
+                }
+                true
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy)]

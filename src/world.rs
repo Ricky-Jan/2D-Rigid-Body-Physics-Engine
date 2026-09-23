@@ -2,6 +2,7 @@ use crate::{
     aabb::AABB,
     bvh::{DynamicBVH, NULL_PTR, TreeNode},
     collision::collide,
+    joint::MouseJoint,
     math::{Complex, EPS, TWO_PI, Vec2},
     pair::Pair,
     rigidbody::RigidBody,
@@ -28,6 +29,10 @@ pub struct World {
     pub pair: Pair,
     pub pair_colliding_list: Vec<usize>,
     pub bvh: DynamicBVH,
+    pub mouse_joints: Vec<MouseJoint>,
+
+    pub bodies_to_destroy: Vec<usize>,
+    pub mouse_joints_to_destroy: Vec<usize>,
 }
 
 impl World {
@@ -67,6 +72,10 @@ impl World {
             pair: Pair::new(),
             pair_colliding_list: Vec::new(),
             bvh: DynamicBVH::new(),
+            mouse_joints: Vec::new(),
+
+            bodies_to_destroy: Vec::new(),
+            mouse_joints_to_destroy: Vec::new(),
         }
     }
 
@@ -275,6 +284,28 @@ impl World {
         body_idx
     }
 
+    pub fn destroy_mouse_joint(&mut self, joint_idx: usize) {
+        if !self.mouse_joints_to_destroy.contains(&joint_idx) {
+            self.mouse_joints_to_destroy.push(joint_idx);
+        }
+    }
+
+    pub fn destroy_rigid(&mut self, body_idx: usize) {
+        if !self.bodies_to_destroy.contains(&body_idx) {
+            self.bodies_to_destroy.push(body_idx);
+        }
+    }
+
+    pub fn wake_up_body(&mut self, body_idx: usize) {
+        let body = &mut self.bodies[body_idx];
+        if body.inv_m > 0.0 {
+            body.wake_up();
+            if !self.bodies_awake_list.contains(&body_idx) {
+                self.bodies_awake_list.push(body_idx);
+            }
+        }
+    }
+
     pub fn step(&mut self) {
         self.sync_shapes();
         self.apply_forces();
@@ -283,6 +314,8 @@ impl World {
         self.resolve_collisions();
         self.integrate_position();
         self.update_islands();
+        self.step_joints();
+        self.clean_up_destroyed();
     }
 
     fn sync_shapes(&mut self) {
@@ -389,8 +422,14 @@ impl World {
 
                     if awake_a && !awake_b && self.bodies[body_b_idx].inv_m > 0.0 {
                         self.bodies[body_b_idx].wake_up();
+                        if !self.bodies_awake_list.contains(&body_b_idx) {
+                            self.bodies_awake_list.push(body_b_idx);
+                        }
                     } else if awake_b && !awake_a && self.bodies[body_a_idx].inv_m > 0.0 {
                         self.bodies[body_a_idx].wake_up();
+                        if !self.bodies_awake_list.contains(&body_a_idx) {
+                            self.bodies_awake_list.push(body_a_idx);
+                        }
                     }
 
                     let body_a = &self.bodies[body_a_idx];
@@ -437,8 +476,6 @@ impl World {
         }
 
         self.bodies_awake_list.clear();
-
-        let mut current_island_id = 1;
 
         for i in 0..self.bodies_active_list.len() {
             let start_idx = self.bodies_active_list[i];
@@ -489,13 +526,14 @@ impl World {
                 }
 
                 if all_can_sleep {
+                    let island_id = self.island_bodies_temp[0];
+
                     for &b in &self.island_bodies_temp {
                         self.bodies[b].is_awake = false;
                         self.bodies[b].vel = Vec2::zero();
                         self.bodies[b].ang_vel = 0.0;
-                        self.bodies[b].island_id = current_island_id;
+                        self.bodies[b].island_id = island_id;
                     }
-                    current_island_id += 1;
                 } else {
                     for &b in &self.island_bodies_temp {
                         self.bodies[b].island_id = 0;
@@ -562,6 +600,103 @@ impl World {
                 body.pos = body.centroid.sub(&rotated_loc);
             }
         }
+    }
+
+    fn step_joints(&mut self) {
+        for mj in &mut self.mouse_joints {
+            mj.init(&self.bodies[mj.body_idx]);
+            mj.warm_start(&mut self.bodies[mj.body_idx]);
+        }
+
+        for _ in 0..JOINT_ITER {
+            for mj in &mut self.mouse_joints {
+                let body = &mut self.bodies[mj.body_idx];
+                mj.solve(body);
+            }
+        }
+    }
+
+    pub fn clean_up_destroyed(&mut self) {
+        for i in 0..self.bodies_to_destroy.len() {
+            let body_idx = self.bodies_to_destroy[i];
+
+            for j in 0..self.mouse_joints.len() {
+                if self.mouse_joints[j].body_idx == body_idx {
+                    self.destroy_mouse_joint(j);
+                }
+            }
+
+            self.bodies[body_idx].wake_up();
+
+            let mut shape_curr = self.bodies[body_idx].shape_head;
+            while shape_curr != NULL_PTR {
+                let next_shape = self.shapes[shape_curr].next;
+                let node_ptr = self.shapes[shape_curr].node_ptr;
+                let shape_type = self.shapes[shape_curr].shape_type;
+
+                if node_ptr != NULL_PTR {
+                    self.bvh.remove_leaf(node_ptr);
+                    self.shapes[shape_curr].node_ptr = NULL_PTR;
+                }
+
+                let mut p = self.pair.active_pairs.len();
+                while p > 0 {
+                    p -= 1;
+                    let pool_idx = self.pair.active_pairs[p];
+
+                    let (s_a, s_b, b_a, b_b) = {
+                        let arbiter = &self.pair.pool[pool_idx].arbiter;
+                        (
+                            arbiter.shape_a_idx,
+                            arbiter.shape_b_idx,
+                            arbiter.body_a_idx,
+                            arbiter.body_b_idx,
+                        )
+                    };
+
+                    if s_a == shape_curr || s_b == shape_curr {
+                        let other_body = if s_a == shape_curr { b_b } else { b_a };
+
+                        self.wake_up_body(other_body);
+
+                        self.pair.remove(pool_idx);
+                    }
+                }
+
+                self.shape_all_list.retain(|&x| x != shape_curr);
+                match shape_type {
+                    ShapeType::Circle(_) => self.circle_all_list.retain(|&x| x != shape_curr),
+                    ShapeType::Rect(_) => self.rect_all_list.retain(|&x| x != shape_curr),
+                    ShapeType::Polygon(_) => self.poly_all_list.retain(|&x| x != shape_curr),
+                }
+
+                self.shapes_free_list.push(shape_curr);
+                shape_curr = next_shape;
+            }
+
+            self.bodies_active_list.retain(|&x| x != body_idx);
+            self.bodies_awake_list.retain(|&x| x != body_idx);
+            self.bodies[body_idx].shape_head = NULL_PTR;
+            self.bodies_free_list.push(body_idx);
+        }
+        self.bodies_to_destroy.clear();
+
+        self.mouse_joints_to_destroy
+            .sort_unstable_by(|a, b| b.cmp(a));
+        self.mouse_joints_to_destroy.dedup();
+
+        for i in 0..self.mouse_joints_to_destroy.len() {
+            let joint_idx = self.mouse_joints_to_destroy[i];
+
+            if joint_idx < self.mouse_joints.len() {
+                let body_idx = self.mouse_joints[joint_idx].body_idx;
+
+                self.wake_up_body(body_idx);
+
+                self.mouse_joints.swap_remove(joint_idx);
+            }
+        }
+        self.mouse_joints_to_destroy.clear();
     }
 }
 
