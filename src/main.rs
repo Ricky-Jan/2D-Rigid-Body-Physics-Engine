@@ -29,6 +29,9 @@ async fn main() {
     let mut camera = Camera::new();
     let mut renderer = Renderer::new();
 
+    camera.pos = Vec2::new(0.0, 1000.0);
+    camera.zoom = 0.8;
+
     let move_speed = 5.0;
     let mut show_debug = false;
 
@@ -36,23 +39,24 @@ async fn main() {
         camera.update_screen_size();
 
         if is_key_down(KeyCode::D) {
-            camera.pos.x += move_speed;
+            camera.pos.x += move_speed / camera.zoom;
         }
         if is_key_down(KeyCode::A) {
-            camera.pos.x -= move_speed;
+            camera.pos.x -= move_speed / camera.zoom;
         }
         if is_key_down(KeyCode::W) {
-            camera.pos.y += move_speed;
+            camera.pos.y += move_speed / camera.zoom;
         }
         if is_key_down(KeyCode::S) {
-            camera.pos.y -= move_speed;
+            camera.pos.y -= move_speed / camera.zoom;
         }
         if is_key_down(KeyCode::X) {
-            camera.zoom *= 0.98;
+            camera.zoom *= 0.99;
         }
         if is_key_down(KeyCode::Z) {
-            camera.zoom *= 1.02;
+            camera.zoom *= 1.01;
         }
+
         if is_key_pressed(KeyCode::Space) {
             show_debug = !show_debug;
         }
@@ -149,10 +153,10 @@ async fn main() {
             spawn_choice = Some(2);
         }
         if is_key_pressed(KeyCode::Key4) {
-            spawn_choice = Some(4);
+            spawn_choice = Some(3);
         }
         if is_key_pressed(KeyCode::Key5) {
-            spawn_choice = Some(rand() % 5);
+            spawn_choice = Some(4);
         }
 
         if let Some(choice) = spawn_choice {
@@ -161,17 +165,17 @@ async fn main() {
 
             match choice {
                 0 => {
-                    let radius = gen_range(10.0, 25.0);
+                    let radius = gen_range(15.0, 30.0);
                     world.create_circle(mouse_world.x, mouse_world.y, radius, angle, density);
                 }
                 1 => {
-                    let width = gen_range(20.0, 60.0);
-                    let height = gen_range(20.0, 60.0);
+                    let width = gen_range(30.0, 60.0);
+                    let height = gen_range(30.0, 60.0);
                     world.create_rect(mouse_world.x, mouse_world.y, width, height, angle, density);
                 }
                 2 => {
                     let sides = gen_range(3, 8) as usize;
-                    let radius = gen_range(15.0, 30.0);
+                    let radius = gen_range(20.0, 40.0);
                     world.create_regular_polygon(
                         mouse_world.x,
                         mouse_world.y,
@@ -227,6 +231,20 @@ async fn main() {
         clear_background(Color::new(0.2118, 0.2706, 0.3098, 1.0));
         world.step();
         renderer.render(&world, &camera, show_debug);
+
+        let hints = [
+            "Controls:",
+            "1,2,3,4,5 : Spawn Shapes",
+            "W,A,S,D   : Move Camera",
+            "Z,X       : Zoom In / Out",
+            "0         : Delete Selected Body",
+            "9         : Delete Random 10 Bodies",
+            "Space     : Toggle Debug View",
+        ];
+
+        for (i, hint) in hints.iter().enumerate() {
+            draw_text(hint, 20.0, 30.0 + (i as f32) * 25.0, 24.0, WHITE);
+        }
 
         next_frame().await;
     }

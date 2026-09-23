@@ -70,7 +70,7 @@ impl TestScene {
                 Vec2::new(-anchor_x, 0.0),
                 if i == 0 { indent } else { rest_len },
                 10.0,
-                10.0,
+                15.0,
             );
             prev_body = plank;
             prev_anchor = Vec2::new(anchor_x, 0.0);
@@ -82,7 +82,7 @@ impl TestScene {
             prev_anchor,
             Vec2::new(-20.0, 0.0),
             indent,
-            15.0,
+            30.0,
             1.0,
         );
 
@@ -129,7 +129,7 @@ impl TestScene {
 
         world.create_rect(-1300.0, 250.0, 20.0, 150.0, PI / 6.0, 0.0);
         world.create_rect(-1100.0, 250.0, 20.0, 150.0, -PI / 6.0, 0.0);
-        world.create_rect(-1200.0, 150.0, 150.0, 20.0, 0.0, 0.0);
+        world.create_rect(-1200.0, 190.0, 145.0, 20.0, 0.0, 0.0);
 
         // ==========================================
         // 5. Dynamic Debris & Compound
