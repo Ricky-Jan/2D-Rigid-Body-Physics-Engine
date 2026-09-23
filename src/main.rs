@@ -119,9 +119,9 @@ async fn main() {
                         shape.body_ptr,
                         mouse_world,
                         local_anchor,
-                        1000000.0,
+                        100000.0 / world.context.dt,
                         1.0,
-                        0.3,
+                        0.01,
                         world.context.dt,
                     );
                     world.mouse_joints.push(mj);
@@ -229,6 +229,7 @@ async fn main() {
         }
 
         clear_background(Color::new(0.2118, 0.2706, 0.3098, 1.0));
+        world.context.dt = get_frame_time() as f64;
         world.step();
         renderer.render(&world, &camera, show_debug);
 

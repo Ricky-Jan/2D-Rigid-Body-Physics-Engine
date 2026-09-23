@@ -33,8 +33,8 @@ impl TestScene {
         // ==========================================
         // 1. Distance Joint + Inset Anchor
         // ==========================================
-        let plank_w = 40.0;
-        let plank_h = 12.0;
+        let plank_w = 100.0;
+        let plank_h = 24.0;
 
         let indent = plank_h / 2.0;
         let anchor_x = plank_w / 2.0 - indent;
@@ -42,17 +42,18 @@ impl TestScene {
 
         let bridge_start_x = -700.0;
         let bridge_y = 1100.0;
-        let plank_count = 35;
+        let plank_count = 15;
 
-        let pillar_l = world.create_rect(bridge_start_x - 40.0, bridge_y, 40.0, 40.0, 0.0, 0.0);
-        let pillar_r = world.create_rect(
+        let pillar_l = world.create_circle(bridge_start_x - 40.0, bridge_y, 20.0, 0.0, 0.0);
+        let pillar_r = world.create_circle(
             bridge_start_x + (plank_count as f64) * plank_w,
             bridge_y,
-            40.0,
-            40.0,
+            20.0,
             0.0,
             0.0,
         );
+        set_filter(&mut world, pillar_l, 1, 0xFFFF, -1);
+        set_filter(&mut world, pillar_r, 1, 0xFFFF, -1);
 
         let mut prev_body = pillar_l;
         let mut prev_anchor = Vec2::new(20.0, 0.0);
@@ -82,12 +83,12 @@ impl TestScene {
             prev_anchor,
             Vec2::new(-20.0, 0.0),
             indent,
-            30.0,
-            1.0,
+            15.0,
+            5.0,
         );
 
         // ==========================================
-        // 2. Ragdoll - self collision ON
+        // 2. Ragdoll
         // ==========================================
         let rag_x = 0.0;
         let rag_y = 1600.0;

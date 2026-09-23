@@ -1,5 +1,5 @@
 pub const FPS: u16 = 60;
-pub const SOLVER_ITER: u16 = 4;
+pub const SOLVER_ITER: u16 = 6;
 pub const JOINT_ITER: u16 = 1;
 pub const SOFTNESS_DAMPING: f64 = 7.0;
 pub const SOFTNESS_FREQUENCY: f64 = 0.5;
